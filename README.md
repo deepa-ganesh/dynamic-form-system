@@ -502,6 +502,30 @@ This project is proprietary software developed for Demo Organization.
 
 ---
 
+## 🎨 Frontend UI (`form-ui`)
+
+Modern React UI for the Dynamic Versioned Form Management System.
+
+### Setup
+
+1. Install dependencies:
+
+```bash
+cd form-ui
+npm install
+```
+
+2. Start dev server:
+
+```bash
+npm run dev
+```
+
+3. Access at: [http://localhost:5173](http://localhost:5173)
+4. Ensure backend is running at: [http://localhost:8080](http://localhost:8080)
+
+---
+
 ## 📝 Notes
 
 ### Version Management

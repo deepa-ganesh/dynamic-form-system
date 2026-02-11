@@ -31,5 +31,10 @@ out/
 .env
 .env.*
 
+# Frontend (form-ui)
+node_modules/
+form-ui/node_modules/
+form-ui/dist/
+
 # Maven wrapper artifacts
 .mvn/wrapper/maven-wrapper.jar

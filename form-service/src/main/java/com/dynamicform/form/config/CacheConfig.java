@@ -1,9 +1,13 @@
 package com.dynamicform.form.config;
 
+import com.fasterxml.jackson.annotation.JsonTypeInfo;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.fasterxml.jackson.databind.SerializationFeature;
+import com.fasterxml.jackson.databind.jsontype.BasicPolymorphicTypeValidator;
 import com.fasterxml.jackson.datatype.jsr310.JavaTimeModule;
 import lombok.extern.slf4j.Slf4j;
+import org.springframework.boot.ApplicationRunner;
+import org.springframework.cache.Cache;
 import org.springframework.cache.CacheManager;
 import org.springframework.cache.annotation.EnableCaching;
 import org.springframework.context.annotation.Bean;
@@ -17,6 +21,7 @@ import org.springframework.data.redis.serializer.StringRedisSerializer;
 
 import java.time.Duration;
 import java.util.HashMap;
+import java.util.List;
 import java.util.Map;
 
 /**
@@ -74,6 +79,28 @@ public class CacheConfig {
     }
 
     /**
+     * Clear cache regions at startup.
+     *
+     * This avoids class-cast issues if cache entries were previously serialized
+     * without type metadata.
+     *
+     * @param cacheManager cache manager
+     * @return startup runner
+     */
+    @Bean
+    public ApplicationRunner cacheStartupCleaner(CacheManager cacheManager) {
+        return args -> {
+            for (String cacheName : List.of("schemas", "activeSchema", "lookupData")) {
+                Cache cache = cacheManager.getCache(cacheName);
+                if (cache != null) {
+                    cache.clear();
+                }
+            }
+            log.info("Cleared cache regions on startup");
+        };
+    }
+
+    /**
      * ObjectMapper for Redis JSON serialization.
      * Configured to handle Java 8 date/time types.
      *
@@ -83,6 +110,15 @@ public class CacheConfig {
         ObjectMapper mapper = new ObjectMapper();
         mapper.registerModule(new JavaTimeModule());
         mapper.disable(SerializationFeature.WRITE_DATES_AS_TIMESTAMPS);
+        mapper.activateDefaultTyping(
+            BasicPolymorphicTypeValidator.builder()
+                .allowIfSubType("com.dynamicform")
+                .allowIfSubType("java.util")
+                .allowIfSubType("java.time")
+                .build(),
+            ObjectMapper.DefaultTyping.NON_FINAL,
+            JsonTypeInfo.As.PROPERTY
+        );
         return mapper;
     }
 }
