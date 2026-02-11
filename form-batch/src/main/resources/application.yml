@@ -1,0 +1,36 @@
+spring:
+  application:
+    name: dynamic-form-system-batch
+
+  data:
+    mongodb:
+      uri: mongodb://localhost:27017/form_system
+      auto-index-creation: true
+
+  batch:
+    job:
+      enabled: false
+    jdbc:
+      initialize-schema: always
+
+  datasource:
+    url: jdbc:h2:mem:batchdb
+    driver-class-name: org.h2.Driver
+    username: sa
+    password:
+
+server:
+  port: 8081
+
+logging:
+  level:
+    com.morganstanley.form.batch: DEBUG
+    org.springframework.batch: INFO
+    org.springframework.scheduling: DEBUG
+  pattern:
+    console: "%d{yyyy-MM-dd HH:mm:ss} - %msg%n"
+
+batch:
+  purge:
+    enabled: true
+    cron: "0 0 0 * * ?"

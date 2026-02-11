@@ -1,15 +1,27 @@
 spring:
   application:
     name: dynamic-form-system
+
   data:
     mongodb:
       uri: mongodb://localhost:27017/form_system
       auto-index-creation: true
+    redis:
+      host: localhost
+      port: 6379
+      timeout: 2000ms
+      lettuce:
+        pool:
+          max-active: 8
+          max-idle: 8
+          min-idle: 0
+
   datasource:
     url: jdbc:postgresql://localhost:5432/form_schema
     username: postgres
     password: postgres
     driver-class-name: org.postgresql.Driver
+
   jpa:
     hibernate:
       ddl-auto: validate
@@ -18,36 +30,52 @@ spring:
       hibernate:
         dialect: org.hibernate.dialect.PostgreSQLDialect
         format_sql: true
-  redis:
-    host: localhost
-    port: 6379
-    timeout: 2000ms
+
   cache:
     type: redis
     redis:
-      time-to-live: 3600000
+      time-to-live: 600000
+      cache-null-values: false
+
+  security:
+    user:
+      name: user
+      password: password
+      roles: USER
 
 server:
   port: 8080
   servlet:
     context-path: /api
 
-logging:
-  level:
-    com.morganstanley.form: DEBUG
-    org.springframework.data.mongodb: INFO
-
 management:
   endpoints:
     web:
       exposure:
-        include: health,info,metrics,prometheus
+        include: health,info,metrics,prometheus,caches
+      base-path: /actuator
   endpoint:
     health:
       show-details: always
+    caches:
+      enabled: true
 
 springdoc:
   api-docs:
     path: /v3/api-docs
   swagger-ui:
     path: /swagger-ui.html
+    tags-sorter: alpha
+    operations-sorter: alpha
+    display-request-duration: true
+    doc-expansion: none
+
+logging:
+  level:
+    com.morganstanley.form: DEBUG
+    org.springframework.security: INFO
+    org.springframework.cache: DEBUG
+    org.springframework.data.redis: INFO
+    org.springframework.data.mongodb: INFO
+  pattern:
+    console: "%d{yyyy-MM-dd HH:mm:ss} [%thread] %-5level %logger{36} - %msg%n"
