@@ -13,6 +13,8 @@ spring:
     hibernate:
       ddl-auto: create-drop
     show-sql: true
+  flyway:
+    enabled: false
 
   cache:
     type: none
@@ -21,6 +23,21 @@ spring:
     user:
       name: testuser
       password: testpassword
+
+app:
+  security:
+    cors:
+      allowed-origin-patterns: http://localhost:5173,http://127.0.0.1:5173
+    demo-users:
+      user:
+        username: user
+        password: password
+      admin:
+        username: admin
+        password: admin
+      alt-admin:
+        username: admin@example.com
+        password: demo123
 
 logging:
   level:

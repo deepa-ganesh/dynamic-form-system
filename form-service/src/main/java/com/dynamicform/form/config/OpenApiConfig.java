@@ -47,7 +47,8 @@ public class OpenApiConfig {
                     - Backward compatibility
 
                     **Authentication:**
-                    - Demo users: `user/password` (USER role), `admin/admin` (ADMIN role)
+                    - HTTP Basic credentials are loaded from application properties / environment
+                    - Local defaults are `user/password` (USER) and `admin/admin` (ADMIN)
                     - Use HTTP Basic authentication
                     - Header format: `Authorization: Basic <base64(username:password)>`
 
@@ -80,7 +81,7 @@ public class OpenApiConfig {
                 .addSecuritySchemes("basicAuth", new SecurityScheme()
                     .type(SecurityScheme.Type.HTTP)
                     .scheme("basic")
-                    .description("HTTP Basic Authentication. Use `user/password` or `admin/admin` for demo.")
+                    .description("HTTP Basic Authentication. Credentials are environment-configurable.")
                 )
             )
             .addSecurityItem(new SecurityRequirement().addList("basicAuth"));

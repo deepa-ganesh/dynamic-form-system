@@ -100,6 +100,7 @@ public class OrderController {
     @ApiResponses(value = {
         @ApiResponse(responseCode = "201", description = "Order version created successfully"),
         @ApiResponse(responseCode = "400", description = "Invalid request data"),
+        @ApiResponse(responseCode = "409", description = "Concurrent version conflict - retry"),
         @ApiResponse(responseCode = "404", description = "No active form schema found"),
         @ApiResponse(responseCode = "401", description = "Unauthorized")
     })
@@ -200,6 +201,7 @@ public class OrderController {
     @ApiResponses(value = {
         @ApiResponse(responseCode = "201", description = "WIP version promoted"),
         @ApiResponse(responseCode = "400", description = "Version is not WIP or invalid request"),
+        @ApiResponse(responseCode = "409", description = "Concurrent version conflict - retry"),
         @ApiResponse(responseCode = "404", description = "Order/version not found"),
         @ApiResponse(responseCode = "401", description = "Unauthorized")
     })

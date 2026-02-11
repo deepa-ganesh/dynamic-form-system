@@ -1,6 +1,7 @@
 package com.dynamicform.form.security;
 
 import lombok.extern.slf4j.Slf4j;
+import org.springframework.beans.factory.annotation.Value;
 import org.springframework.context.annotation.Bean;
 import org.springframework.context.annotation.Configuration;
 import org.springframework.http.HttpMethod;
@@ -20,6 +21,7 @@ import org.springframework.security.web.SecurityFilterChain;
  * Spring Security configuration.
  *
  * For this demo/interview, using simplified in-memory authentication.
+ * Demo usernames/passwords are sourced from application properties.
  * In production, this would integrate with:
  * - JWT tokens
  * - OAuth2/OIDC
@@ -38,6 +40,24 @@ import org.springframework.security.web.SecurityFilterChain;
 @EnableMethodSecurity(prePostEnabled = true)
 @Slf4j
 public class SecurityConfig {
+
+    @Value("${app.security.demo-users.user.username:user}")
+    private String userUsername;
+
+    @Value("${app.security.demo-users.user.password:password}")
+    private String userPassword;
+
+    @Value("${app.security.demo-users.admin.username:admin}")
+    private String adminUsername;
+
+    @Value("${app.security.demo-users.admin.password:admin}")
+    private String adminPassword;
+
+    @Value("${app.security.demo-users.alt-admin.username:admin@example.com}")
+    private String altAdminUsername;
+
+    @Value("${app.security.demo-users.alt-admin.password:demo123}")
+    private String altAdminPassword;
 
     /**
      * Configure security filter chain.
@@ -87,9 +107,10 @@ public class SecurityConfig {
     /**
      * In-memory user details service for demo.
      *
-     * Creates two users:
-     * - user / password (ROLE_USER)
-     * - admin / admin (ROLE_USER, ROLE_ADMIN)
+     * Creates configured demo users:
+     * - configured USER credentials (ROLE_USER)
+     * - configured ADMIN credentials (ROLE_USER, ROLE_ADMIN)
+     * - configured alternate ADMIN credentials (ROLE_USER, ROLE_ADMIN)
      *
      * In production, replace with:
      * - JdbcUserDetailsManager (database users)
@@ -103,24 +124,24 @@ public class SecurityConfig {
         log.info("Configuring in-memory user details service (DEMO ONLY)");
 
         UserDetails user = User.builder()
-            .username("user")
-            .password(passwordEncoder().encode("password"))
+            .username(userUsername)
+            .password(passwordEncoder().encode(userPassword))
             .roles("USER")
             .build();
 
         UserDetails admin = User.builder()
-            .username("admin")
-            .password(passwordEncoder().encode("admin"))
+            .username(adminUsername)
+            .password(passwordEncoder().encode(adminPassword))
             .roles("USER", "ADMIN")
             .build();
 
         UserDetails demoAdmin = User.builder()
-            .username("admin@example.com")
-            .password(passwordEncoder().encode("demo123"))
+            .username(altAdminUsername)
+            .password(passwordEncoder().encode(altAdminPassword))
             .roles("USER", "ADMIN")
             .build();
 
-        log.info("Created demo users: user (USER), admin (ADMIN), admin@example.com (ADMIN)");
+        log.info("Created configured demo users: {}, {}, {}", userUsername, adminUsername, altAdminUsername);
 
         return new InMemoryUserDetailsManager(user, admin, demoAdmin);
     }

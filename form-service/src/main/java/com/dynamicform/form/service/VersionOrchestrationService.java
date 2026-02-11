@@ -9,6 +9,7 @@ import com.dynamicform.form.common.enums.OrderStatus;
 import com.dynamicform.form.common.exception.OrderNotFoundException;
 import com.dynamicform.form.common.exception.SchemaNotFoundException;
 import com.dynamicform.form.common.exception.ValidationException;
+import com.dynamicform.form.common.exception.VersionConflictException;
 import com.dynamicform.form.entity.mongo.OrderVersionIndex;
 import com.dynamicform.form.entity.mongo.OrderVersionedDocument;
 import com.dynamicform.form.entity.postgres.FormSchemaEntity;
@@ -18,6 +19,7 @@ import com.dynamicform.form.repository.mongo.OrderVersionedRepository;
 import com.dynamicform.form.repository.postgres.FormSchemaRepository;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
+import org.springframework.dao.DuplicateKeyException;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
@@ -149,16 +151,27 @@ public class VersionOrchestrationService {
             .orderData(resolvedOrderData)
             .build();
 
-        // Step 5: Save to MongoDB
-        OrderVersionedDocument savedDocument = orderVersionedRepository.save(newDocument);
-        log.info("Saved version {} for orderId: {} with status: {}",
-                 newVersionNumber, resolvedOrderId, orderStatus);
+        try {
+            // Step 5: Save to MongoDB
+            OrderVersionedDocument savedDocument = orderVersionedRepository.save(newDocument);
+            log.info("Saved version {} for orderId: {} with status: {}",
+                     newVersionNumber, resolvedOrderId, orderStatus);
 
-        // Step 6: Create index entry
-        createVersionIndex(savedDocument);
+            // Step 6: Create index entry
+            createVersionIndex(savedDocument);
 
-        // Step 7: Return response DTO
-        return mapToResponse(savedDocument, true);
+            // Step 7: Return response DTO
+            return mapToResponse(savedDocument, true);
+        } catch (DuplicateKeyException ex) {
+            throw new VersionConflictException(
+                String.format(
+                    "Concurrent save detected for order %s while creating version %d. Please retry the operation.",
+                    resolvedOrderId,
+                    newVersionNumber
+                ),
+                ex
+            );
+        }
     }
 
     /**
@@ -182,9 +195,19 @@ public class VersionOrchestrationService {
             .documentSize(documentSize)
             .build();
 
-        orderVersionIndexRepository.save(index);
-        log.debug("Created version index for orderId: {}, version: {}",
-                 document.getOrderId(), document.getOrderVersionNumber());
+        try {
+            orderVersionIndexRepository.save(index);
+            log.debug("Created version index for orderId: {}, version: {}",
+                     document.getOrderId(), document.getOrderVersionNumber());
+        } catch (DuplicateKeyException ex) {
+            // Idempotency safety: document save already succeeded, so don't fail the request
+            // if index entry was created by a concurrent/previous attempt.
+            log.warn(
+                "Version index already exists for orderId={}, version={}. Continuing without failure.",
+                document.getOrderId(),
+                document.getOrderVersionNumber()
+            );
+        }
     }
 
     /**
@@ -447,17 +470,28 @@ public class VersionOrchestrationService {
             .orderData(sourceData)
             .build();
 
-        OrderVersionedDocument savedDocument = orderVersionedRepository.save(promotedDocument);
-        createVersionIndex(savedDocument);
+        try {
+            OrderVersionedDocument savedDocument = orderVersionedRepository.save(promotedDocument);
+            createVersionIndex(savedDocument);
 
-        log.info(
-            "Promoted WIP version {} to committed version {} for orderId={}",
-            sourceVersionNumber,
-            newVersionNumber,
-            orderId
-        );
+            log.info(
+                "Promoted WIP version {} to committed version {} for orderId={}",
+                sourceVersionNumber,
+                newVersionNumber,
+                orderId
+            );
 
-        return mapToResponse(savedDocument, true);
+            return mapToResponse(savedDocument, true);
+        } catch (DuplicateKeyException ex) {
+            throw new VersionConflictException(
+                String.format(
+                    "Concurrent save detected for order %s while promoting version %d. Please retry the operation.",
+                    orderId,
+                    sourceVersionNumber
+                ),
+                ex
+            );
+        }
     }
 
     /**

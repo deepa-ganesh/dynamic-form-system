@@ -30,6 +30,8 @@ out/
 # Environment and local config
 .env
 .env.*
+!.env.example
+!**/.env.example
 
 # Frontend (form-ui)
 node_modules/

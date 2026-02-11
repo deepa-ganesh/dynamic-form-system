@@ -55,7 +55,7 @@ This system enables organizations to manage complex order forms with:
 - ✅ **Field mapping registry** - Configure transformations declaratively
 
 ### Enterprise Features
-- ✅ **Spring Security** - JWT authentication with role-based access
+- ✅ **Spring Security** - HTTP Basic (demo mode) with role-based access
 - ✅ **Redis caching** - High-performance schema and lookup caching
 - ✅ **Spring Batch** - Scheduled purge jobs
 - ✅ **REST API** - Full CRUD operations with OpenAPI documentation
@@ -201,7 +201,7 @@ java -jar target/form-service-1.0.0.jar
 ### 5. Verify Application is Running
 ```bash
 # Check health endpoint
-curl http://localhost:8080/actuator/health
+curl http://localhost:8080/api/actuator/health
 
 # Expected output:
 # {"status":"UP"}
@@ -309,7 +309,7 @@ docker-compose down
 ### Swagger UI (OpenAPI)
 Once the application is running, access interactive API documentation at:
 
-**http://localhost:8080/swagger-ui.html**
+**http://localhost:8080/api/swagger-ui.html**
 
 ### Key Endpoints
 
@@ -356,7 +356,7 @@ PUT /api/v1/schemas/{formVersionId}/activate
 ```bash
 curl -X POST http://localhost:8080/api/v1/orders \
   -H "Content-Type: application/json" \
-  -H "Authorization: Bearer YOUR_JWT_TOKEN" \
+  -u user:password \
   -d '{
     "orderId": "ORD-12345",
     "deliveryLocations": ["New York", "Boston"],
@@ -432,13 +432,14 @@ mvn test -Dtest=VersionOrchestrationServiceTest
 
 ### Core Documentation
 - **[REQUIREMENTS.md](docs/REQUIREMENTS.md)** - Business requirements and functional specifications
+- **[REQUIREMENTS-COMPACT.md](docs/REQUIREMENTS-COMPACT.md)** - Manager-ready compact requirements (<1000 words)
 - **[DATA-MODEL-DESIGN.md](docs/DATA-MODEL-DESIGN.md)** - Database design, entities, and data flows
 - **[ARCHITECTURE-DIAGRAM.md](docs/ARCHITECTURE-DIAGRAM.md)** - System architecture and component diagrams
 - **[AGENTS.md](AGENTS.md)** - Coding standards and guidelines for AI agents
 
 ### Additional Resources
-- **Swagger/OpenAPI** - http://localhost:8080/swagger-ui.html (when running)
-- **Actuator Endpoints** - http://localhost:8080/actuator (when running)
+- **Swagger/OpenAPI** - http://localhost:8080/api/swagger-ui.html (when running)
+- **Actuator Endpoints** - http://localhost:8080/api/actuator (when running)
 
 ---
 
@@ -495,10 +496,10 @@ This project is proprietary software developed for Demo Organization.
 
 ## 🔗 Quick Links
 
-- **Local API:** http://localhost:8080
-- **Swagger UI:** http://localhost:8080/swagger-ui.html
-- **Health Check:** http://localhost:8080/actuator/health
-- **Metrics:** http://localhost:8080/actuator/metrics
+- **Local API:** http://localhost:8080/api
+- **Swagger UI:** http://localhost:8080/api/swagger-ui.html
+- **Health Check:** http://localhost:8080/api/actuator/health
+- **Metrics:** http://localhost:8080/api/actuator/metrics
 
 ---
 

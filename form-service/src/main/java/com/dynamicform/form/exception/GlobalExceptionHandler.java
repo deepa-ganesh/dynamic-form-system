@@ -8,6 +8,7 @@ import com.dynamicform.form.common.exception.SchemaVersionException;
 import com.dynamicform.form.common.exception.ValidationException;
 import com.dynamicform.form.common.exception.VersionConflictException;
 import lombok.extern.slf4j.Slf4j;
+import org.springframework.dao.DuplicateKeyException;
 import org.springframework.http.HttpStatus;
 import org.springframework.http.ResponseEntity;
 import org.springframework.security.access.AccessDeniedException;
@@ -108,6 +109,28 @@ public class GlobalExceptionHandler {
             .status(HttpStatus.CONFLICT.value())
             .error("Version Conflict")
             .message(ex.getMessage())
+            .path(request.getDescription(false).replace("uri=", ""))
+            .build();
+
+        return ResponseEntity.status(HttpStatus.CONFLICT).body(error);
+    }
+
+    /**
+     * Handle low-level duplicate key conflicts and map them to 409.
+     *
+     * This is a safety-net for concurrent insert collisions.
+     */
+    @ExceptionHandler(DuplicateKeyException.class)
+    public ResponseEntity<ErrorResponse> handleDuplicateKey(
+            DuplicateKeyException ex, WebRequest request) {
+
+        log.error("Duplicate key conflict: {}", ex.getMessage());
+
+        ErrorResponse error = ErrorResponse.builder()
+            .timestamp(LocalDateTime.now())
+            .status(HttpStatus.CONFLICT.value())
+            .error("Version Conflict")
+            .message("Concurrent save detected. Please retry the operation.")
             .path(request.getDescription(false).replace("uri=", ""))
             .build();
 

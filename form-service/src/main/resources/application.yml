@@ -31,17 +31,16 @@ spring:
         dialect: org.hibernate.dialect.PostgreSQLDialect
         format_sql: true
 
+  flyway:
+    enabled: true
+    locations: classpath:db/migration
+    baseline-on-migrate: true
+
   cache:
     type: redis
     redis:
       time-to-live: 600000
       cache-null-values: false
-
-  security:
-    user:
-      name: user
-      password: password
-      roles: USER
 
 server:
   port: 8080
@@ -79,3 +78,18 @@ logging:
     org.springframework.data.mongodb: INFO
   pattern:
     console: "%d{yyyy-MM-dd HH:mm:ss} [%thread] %-5level %logger{36} - %msg%n"
+
+app:
+  security:
+    cors:
+      allowed-origin-patterns: ${CORS_ALLOWED_ORIGIN_PATTERNS:http://localhost:5173,http://127.0.0.1:5173}
+    demo-users:
+      user:
+        username: ${DEMO_USER_USERNAME:user}
+        password: ${DEMO_USER_PASSWORD:password}
+      admin:
+        username: ${DEMO_ADMIN_USERNAME:admin}
+        password: ${DEMO_ADMIN_PASSWORD:admin}
+      alt-admin:
+        username: ${DEMO_ALT_ADMIN_USERNAME:admin@example.com}
+        password: ${DEMO_ALT_ADMIN_PASSWORD:demo123}

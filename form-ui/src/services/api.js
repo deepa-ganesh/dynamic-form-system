@@ -10,12 +10,12 @@ export const DEMO_ROLES = {
 
 const DEMO_CREDENTIALS = {
   [DEMO_ROLES.USER]: {
-    username: "user",
-    password: "password"
+    username: import.meta.env.VITE_DEMO_USER_USERNAME || "user",
+    password: import.meta.env.VITE_DEMO_USER_PASSWORD || "password"
   },
   [DEMO_ROLES.ADMIN]: {
-    username: import.meta.env.VITE_API_USERNAME || "admin",
-    password: import.meta.env.VITE_API_PASSWORD || "admin"
+    username: import.meta.env.VITE_DEMO_ADMIN_USERNAME || "admin",
+    password: import.meta.env.VITE_DEMO_ADMIN_PASSWORD || "admin"
   }
 };
 
