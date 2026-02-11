@@ -1,0 +1,53 @@
+spring:
+  application:
+    name: dynamic-form-system
+  data:
+    mongodb:
+      uri: mongodb://localhost:27017/form_system
+      auto-index-creation: true
+  datasource:
+    url: jdbc:postgresql://localhost:5432/form_schema
+    username: postgres
+    password: postgres
+    driver-class-name: org.postgresql.Driver
+  jpa:
+    hibernate:
+      ddl-auto: validate
+    show-sql: false
+    properties:
+      hibernate:
+        dialect: org.hibernate.dialect.PostgreSQLDialect
+        format_sql: true
+  redis:
+    host: localhost
+    port: 6379
+    timeout: 2000ms
+  cache:
+    type: redis
+    redis:
+      time-to-live: 3600000
+
+server:
+  port: 8080
+  servlet:
+    context-path: /api
+
+logging:
+  level:
+    com.morganstanley.form: DEBUG
+    org.springframework.data.mongodb: INFO
+
+management:
+  endpoints:
+    web:
+      exposure:
+        include: health,info,metrics,prometheus
+  endpoint:
+    health:
+      show-details: always
+
+springdoc:
+  api-docs:
+    path: /v3/api-docs
+  swagger-ui:
+    path: /swagger-ui.html
