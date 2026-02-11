@@ -432,7 +432,6 @@ mvn test -Dtest=VersionOrchestrationServiceTest
 
 ### Core Documentation
 - **[REQUIREMENTS.md](docs/REQUIREMENTS.md)** - Business requirements and functional specifications
-- **[REQUIREMENTS-COMPACT.md](docs/REQUIREMENTS-COMPACT.md)** - Manager-ready compact requirements (<1000 words)
 - **[DATA-MODEL-DESIGN.md](docs/DATA-MODEL-DESIGN.md)** - Database design, entities, and data flows
 - **[ARCHITECTURE-DIAGRAM.md](docs/ARCHITECTURE-DIAGRAM.md)** - System architecture and component diagrams
 - **[AGENTS.md](AGENTS.md)** - Coding standards and guidelines for AI agents
