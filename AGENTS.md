@@ -60,7 +60,7 @@ dynamic-form-system/
 ├── pom.xml                           # Parent POM
 │
 ├── form-common/                      # Shared module
-│   ├── src/main/java/com/morganstanley/form/common/
+│   ├── src/main/java/com/dynamicform/form/common/
 │   │   ├── model/                    # Domain models
 │   │   ├── dto/                      # Data Transfer Objects
 │   │   ├── enums/                    # Enums (OrderStatus, FieldType)
@@ -68,7 +68,7 @@ dynamic-form-system/
 │   │   └── util/                     # Utility classes
 │
 ├── form-service/                     # Main backend application
-│   ├── src/main/java/com/morganstanley/form/
+│   ├── src/main/java/com/dynamicform/form/
 │   │   ├── FormApplication.java      # Main class
 │   │   ├── config/                   # Configuration
 │   │   │   ├── MongoConfig.java
@@ -110,7 +110,7 @@ dynamic-form-system/
 │       └── application-prod.yml
 │
 ├── form-batch/                       # Batch jobs
-│   └── src/main/java/com/morganstanley/form/batch/
+│   └── src/main/java/com/dynamicform/form/batch/
 │       ├── BatchApplication.java
 │       ├── config/
 │       │   └── PurgeJobConfig.java
@@ -138,14 +138,14 @@ dynamic-form-system/
 
 ### Java Package Naming
 ```
-com.morganstanley.form.{layer}
+com.dynamicform.form.{layer}
 ```
 
 **Examples:**
-- `com.morganstanley.form.controller`
-- `com.morganstanley.form.service`
-- `com.morganstanley.form.repository.mongo`
-- `com.morganstanley.form.entity.postgres`
+- `com.dynamicform.form.controller`
+- `com.dynamicform.form.service`
+- `com.dynamicform.form.repository.mongo`
+- `com.dynamicform.form.entity.postgres`
 
 ### Class Naming
 

@@ -35,7 +35,7 @@ server:
 
 logging:
   level:
-    com.morganstanley.form: INFO
+    com.dynamicform.form: INFO
     org.springframework.data.mongodb: WARN
     org.springframework.security: WARN
 

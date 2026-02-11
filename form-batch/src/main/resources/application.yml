@@ -24,7 +24,7 @@ server:
 
 logging:
   level:
-    com.morganstanley.form.batch: DEBUG
+    com.dynamicform.form.batch: DEBUG
     org.springframework.batch: INFO
     org.springframework.scheduling: DEBUG
   pattern:

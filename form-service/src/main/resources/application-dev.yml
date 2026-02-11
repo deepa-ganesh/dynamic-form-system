@@ -34,7 +34,7 @@ server:
 
 logging:
   level:
-    com.morganstanley.form: TRACE
+    com.dynamicform.form: TRACE
     org.springframework.data.mongodb: DEBUG
     org.springframework.data.redis: DEBUG
     org.springframework.web: DEBUG

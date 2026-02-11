@@ -224,7 +224,7 @@ dynamic-form-system/
 │
 ├── form-common/                 # Shared module
 │   ├── pom.xml
-│   └── src/main/java/com/morganstanley/form/common/
+│   └── src/main/java/com/dynamicform/form/common/
 │       ├── dto/                 # Data Transfer Objects
 │       ├── enums/               # Enums (OrderStatus, etc.)
 │       ├── exception/           # Custom exceptions
@@ -234,7 +234,7 @@ dynamic-form-system/
 │   ├── pom.xml
 │   └── src/
 │       ├── main/
-│       │   ├── java/com/morganstanley/form/
+│       │   ├── java/com/dynamicform/form/
 │       │   │   ├── FormApplication.java      # Main class
 │       │   │   ├── config/                   # Configuration
 │       │   │   ├── controller/               # REST Controllers
@@ -253,11 +253,11 @@ dynamic-form-system/
 │       │       ├── application-dev.yml
 │       │       └── application-prod.yml
 │       └── test/                             # Tests
-│           └── java/com/morganstanley/form/
+│           └── java/com/dynamicform/form/
 │
 └── form-batch/                  # Batch jobs
     ├── pom.xml
-    └── src/main/java/com/morganstanley/form/batch/
+    └── src/main/java/com/dynamicform/form/batch/
         ├── BatchApplication.java
         ├── config/              # Batch configuration
         └── job/                 # Purge job
@@ -385,7 +385,7 @@ curl -X POST http://localhost:8080/api/v1/orders \
   "orderVersionNumber": 1,
   "formVersionId": "v2.1.0",
   "orderStatus": "WIP",
-  "userName": "deepa.ganesh@morganstanley.com",
+  "userName": "admin@example.com",
   "timestamp": "2026-02-11T10:30:00Z",
   "isLatestVersion": true,
   "data": { ... }
@@ -479,16 +479,16 @@ Closes #123
 
 ## 📄 License
 
-This project is proprietary software developed for Morgan Stanley.
+This project is proprietary software developed for Demo Organization.
 
-**Copyright © 2026 Morgan Stanley. All rights reserved.**
+**Copyright © 2026 Demo Organization. All rights reserved.**
 
 ---
 
 ## 👥 Team
 
-**Project Owner:** Deepa Ganesh  
-**Email:** deepa.ganesh@morganstanley.com  
+**Project Owner:** Demo Owner  
+**Email:** admin@example.com  
 **Interview Date:** February 11, 2026, 7:00 PM
 
 ---
