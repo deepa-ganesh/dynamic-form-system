@@ -4,6 +4,8 @@ import com.fasterxml.jackson.databind.ObjectMapper;
 import com.dynamicform.form.common.dto.CreateOrderRequest;
 import com.dynamicform.form.common.dto.OrderVersionResponse;
 import com.dynamicform.form.common.enums.OrderStatus;
+import com.dynamicform.form.service.DataTransformationService;
+import com.dynamicform.form.service.SchemaManagementService;
 import com.dynamicform.form.service.VersionOrchestrationService;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
@@ -46,6 +48,12 @@ class OrderControllerIntegrationTest {
 
     @MockBean
     private VersionOrchestrationService versionOrchestrationService;
+
+    @MockBean
+    private DataTransformationService dataTransformationService;
+
+    @MockBean
+    private SchemaManagementService schemaManagementService;
 
     @Test
     @DisplayName("Should require authentication for order endpoints")

@@ -1,6 +1,7 @@
 import { useEffect, useMemo, useState } from "react";
 import {
   ArrowDownToLine,
+  ArrowUpCircle,
   Clock3,
   Copy,
   Database,
@@ -8,9 +9,12 @@ import {
   RefreshCcw,
   Search
 } from "lucide-react";
+import { useSearchParams } from "react-router-dom";
 import {
   getCommittedVersions,
   getLatestVersion,
+  promoteOrderVersion,
+  getSchemaByVersionId,
   getSpecificVersion,
   getVersionHistory
 } from "../services/api";
@@ -62,7 +66,22 @@ function computeDiff(current, previous) {
   return diff;
 }
 
+function getValueByPath(source, path) {
+  if (!source || !path) {
+    return undefined;
+  }
+
+  return path.split(".").reduce((current, key) => {
+    if (current == null) {
+      return undefined;
+    }
+    return current[key];
+  }, source);
+}
+
 export default function VersionHistory({ onNotify }) {
+  const [searchParams, setSearchParams] = useSearchParams();
+  const requestedOrderIdParam = searchParams.get("orderId");
   const [orderId, setOrderId] = useState("");
   const [historyData, setHistoryData] = useState(null);
   const [latestVersion, setLatestVersion] = useState(null);
@@ -70,8 +89,11 @@ export default function VersionHistory({ onNotify }) {
   const [showCommittedOnly, setShowCommittedOnly] = useState(false);
   const [selectedVersionNumber, setSelectedVersionNumber] = useState(null);
   const [versionDetails, setVersionDetails] = useState({});
+  const [schemaByVersionId, setSchemaByVersionId] = useState({});
   const [loadingDetails, setLoadingDetails] = useState(false);
+  const [loadingSchema, setLoadingSchema] = useState(false);
   const [loading, setLoading] = useState(false);
+  const [promoting, setPromoting] = useState(false);
   const [error, setError] = useState("");
   const [autoRefresh, setAutoRefresh] = useState(false);
 
@@ -136,6 +158,14 @@ export default function VersionHistory({ onNotify }) {
     [selectedVersionDetail, previousVersionDetail]
   );
 
+  const selectedSchema = useMemo(() => {
+    const versionId = selectedVersionDetail?.formVersionId;
+    if (!versionId) {
+      return null;
+    }
+    return schemaByVersionId[versionId] || null;
+  }, [schemaByVersionId, selectedVersionDetail?.formVersionId]);
+
   const loadVersionDetails = async (targetOrderId, targetVersionNumber) => {
     if (!targetOrderId || !targetVersionNumber) {
       return;
@@ -163,6 +193,33 @@ export default function VersionHistory({ onNotify }) {
     }
   };
 
+  const loadSchemaForVersion = async (formVersionId) => {
+    if (!formVersionId) {
+      return;
+    }
+
+    if (schemaByVersionId[formVersionId]) {
+      return;
+    }
+
+    setLoadingSchema(true);
+    try {
+      const schema = await getSchemaByVersionId(formVersionId);
+      setSchemaByVersionId((prev) => ({
+        ...prev,
+        [formVersionId]: schema
+      }));
+    } catch (apiError) {
+      onNotify({
+        type: "error",
+        title: "Schema Load Failed",
+        message: apiError.message || `Could not load schema ${formVersionId}`
+      });
+    } finally {
+      setLoadingSchema(false);
+    }
+  };
+
   const loadHistory = async (searchOrderId = orderId) => {
     const trimmedOrderId = searchOrderId.trim();
 
@@ -173,6 +230,10 @@ export default function VersionHistory({ onNotify }) {
 
     setLoading(true);
     setError("");
+    setOrderId(trimmedOrderId);
+    if (searchParams.get("orderId") !== trimmedOrderId) {
+      setSearchParams({ orderId: trimmedOrderId });
+    }
 
     try {
       const [historyResponse, latestResponse, committedResponse] = await Promise.all([
@@ -185,6 +246,7 @@ export default function VersionHistory({ onNotify }) {
       setLatestVersion(latestResponse);
       setCommittedVersions(Array.isArray(committedResponse) ? committedResponse : []);
       setVersionDetails({});
+      setSchemaByVersionId({});
 
       const defaultVersions = showCommittedOnly
         ? [...(Array.isArray(committedResponse) ? committedResponse : [])].sort(
@@ -215,6 +277,45 @@ export default function VersionHistory({ onNotify }) {
     }
   };
 
+  const handlePromote = async () => {
+    if (!historyData?.orderId || !selectedVersionSummary?.orderVersionNumber) {
+      return;
+    }
+    if (selectedVersionSummary.orderStatus !== "WIP") {
+      return;
+    }
+
+    const defaultDescription = `Promoted from WIP version ${selectedVersionSummary.orderVersionNumber}`;
+    const promptValue = window.prompt("Change description for promoted version:", defaultDescription);
+
+    if (promptValue === null) {
+      return;
+    }
+
+    setPromoting(true);
+    try {
+      const response = await promoteOrderVersion(
+        historyData.orderId,
+        selectedVersionSummary.orderVersionNumber,
+        { changeDescription: promptValue.trim() || defaultDescription }
+      );
+
+      onNotify({
+        title: "WIP Promoted",
+        message: `Created committed version ${response.orderVersionNumber} for ${response.orderId}`
+      });
+
+      await loadHistory(historyData.orderId);
+      setSelectedVersionNumber(response.orderVersionNumber);
+    } catch (apiError) {
+      const message = apiError.message || "Unable to promote WIP version";
+      setError(message);
+      onNotify({ type: "error", title: "Promotion Failed", message });
+    } finally {
+      setPromoting(false);
+    }
+  };
+
   useEffect(() => {
     if (!autoRefresh || !historyData?.orderId) {
       return undefined;
@@ -238,6 +339,15 @@ export default function VersionHistory({ onNotify }) {
   }, [historyData?.orderId, selectedVersionSummary?.orderVersionNumber]);
 
   useEffect(() => {
+    const formVersionId = selectedVersionDetail?.formVersionId;
+    if (!formVersionId) {
+      return;
+    }
+
+    loadSchemaForVersion(formVersionId);
+  }, [selectedVersionDetail?.formVersionId]);
+
+  useEffect(() => {
     if (displayedVersions.length === 0) {
       setSelectedVersionNumber(null);
       return;
@@ -251,6 +361,19 @@ export default function VersionHistory({ onNotify }) {
       setSelectedVersionNumber(displayedVersions.at(-1)?.orderVersionNumber || null);
     }
   }, [displayedVersions, selectedVersionNumber]);
+
+  useEffect(() => {
+    const requestedOrderId = (requestedOrderIdParam || "").trim().toUpperCase();
+    if (!requestedOrderId) {
+      return;
+    }
+    if (historyData?.orderId === requestedOrderId) {
+      return;
+    }
+
+    setOrderId(requestedOrderId);
+    loadHistory(requestedOrderId);
+  }, [requestedOrderIdParam]);
 
   const copyOrderId = async () => {
     if (!historyData?.orderId) {
@@ -514,6 +637,90 @@ export default function VersionHistory({ onNotify }) {
               <p>
                 <span className="text-slate-400">User:</span> {selectedVersionSummary.userName}
               </p>
+            </div>
+
+            {selectedVersionSummary.orderStatus === "WIP" ? (
+              <button
+                className="primary-btn w-full justify-center"
+                type="button"
+                disabled={promoting || loading}
+                onClick={handlePromote}
+              >
+                {promoting ? (
+                  <Loader2 className="h-4 w-4 animate-spin" />
+                ) : (
+                  <ArrowUpCircle className="h-4 w-4" />
+                )}
+                Promote This WIP Version
+              </button>
+            ) : null}
+
+            <div className="rounded-lg border border-slate-700 bg-slate-900/50 p-3">
+              <p className="mb-2 text-xs font-semibold uppercase tracking-wide text-slate-300">
+                Schema-Aligned View ({selectedVersionDetail?.formVersionId || "-"})
+              </p>
+              {loadingSchema ? (
+                <p className="inline-flex items-center gap-2 text-sm text-slate-300">
+                  <Loader2 className="h-4 w-4 animate-spin" /> Loading schema for selected version...
+                </p>
+              ) : Array.isArray(selectedSchema?.fieldDefinitions?.fields) ? (
+                <ul className="space-y-2 text-xs">
+                  {selectedSchema.fieldDefinitions.fields.map((field) => {
+                    const fieldName = field?.fieldName || field?.fieldId;
+                    const fieldType = String(field?.fieldType || "text").toLowerCase();
+                    const fieldLabel = field?.label || fieldName || "Unnamed field";
+                    const fieldValue = getValueByPath(selectedVersionDetail?.data || {}, fieldName);
+
+                    if (!fieldName) {
+                      return null;
+                    }
+
+                    if (fieldType === "table" && Array.isArray(fieldValue)) {
+                      return (
+                        <li key={fieldName} className="rounded border border-slate-700 bg-slate-950/60 p-2">
+                          <p className="mb-1 font-semibold text-blue-200">{fieldLabel}</p>
+                          <pre className="max-h-40 overflow-auto text-[11px] text-slate-200">
+                            {JSON.stringify(fieldValue, null, 2)}
+                          </pre>
+                        </li>
+                      );
+                    }
+
+                    if (fieldType === "multivalue" && Array.isArray(fieldValue)) {
+                      return (
+                        <li key={fieldName} className="rounded border border-slate-700 bg-slate-950/60 p-2">
+                          <p className="mb-1 font-semibold text-blue-200">{fieldLabel}</p>
+                          <p className="text-slate-200">{fieldValue.join(", ") || "-"}</p>
+                        </li>
+                      );
+                    }
+
+                    if (fieldType === "subform" && fieldValue && typeof fieldValue === "object") {
+                      return (
+                        <li key={fieldName} className="rounded border border-slate-700 bg-slate-950/60 p-2">
+                          <p className="mb-1 font-semibold text-blue-200">{fieldLabel}</p>
+                          <pre className="max-h-40 overflow-auto text-[11px] text-slate-200">
+                            {JSON.stringify(fieldValue, null, 2)}
+                          </pre>
+                        </li>
+                      );
+                    }
+
+                    return (
+                      <li key={fieldName} className="rounded border border-slate-700 bg-slate-950/60 p-2">
+                        <p className="mb-1 font-semibold text-blue-200">{fieldLabel}</p>
+                        <p className="text-slate-200">
+                          {fieldValue == null || fieldValue === "" ? "-" : String(fieldValue)}
+                        </p>
+                      </li>
+                    );
+                  })}
+                </ul>
+              ) : (
+                <p className="text-sm text-slate-400">
+                  Schema metadata is unavailable for this version. Showing raw payload below.
+                </p>
+              )}
             </div>
 
             <div className="rounded-lg border border-slate-700 bg-slate-900/50 p-3">

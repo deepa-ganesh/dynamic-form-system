@@ -1,6 +1,6 @@
 import { useEffect, useState } from "react";
 import { NavLink, Outlet, useLocation, useNavigate } from "react-router-dom";
-import { ClipboardList, FileDiff, History, Layers3 } from "lucide-react";
+import { ClipboardList, FileDiff, History, Layers3, ListOrdered } from "lucide-react";
 import { DEMO_ROLES, getDemoRole, setDemoRole } from "../services/api";
 
 const navItems = [
@@ -9,6 +9,12 @@ const navItems = [
     label: "Order Form",
     icon: ClipboardList,
     description: "Create WIP and committed versions"
+  },
+  {
+    to: "/orders-list",
+    label: "All Orders",
+    icon: ListOrdered,
+    description: "Browse latest snapshot of every order"
   },
   {
     to: "/history",
@@ -131,7 +137,7 @@ export default function Dashboard() {
             </header>
 
             <nav
-              className={`glass-card mt-3 grid gap-3 transition-all duration-300 md:grid-cols-3 ${
+              className={`glass-card mt-3 grid gap-3 transition-all duration-300 md:grid-cols-2 xl:grid-cols-4 ${
                 isCompact ? "p-2" : "p-3"
               }`}
             >

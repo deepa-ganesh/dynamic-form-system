@@ -25,6 +25,14 @@ public interface FieldMappingRepository extends JpaRepository<FieldMappingEntity
     List<FieldMappingEntity> findByFormVersionId(String formVersionId);
 
     /**
+     * Find all mappings for a specific form version ordered by processing order.
+     *
+     * @param formVersionId the schema version ID
+     * @return ordered list of mappings
+     */
+    List<FieldMappingEntity> findByFormVersionIdOrderByProcessingOrderAscIdAsc(String formVersionId);
+
+    /**
      * Find all active mappings for a form version.
      *
      * @param formVersionId the schema version ID
@@ -71,6 +79,15 @@ public interface FieldMappingRepository extends JpaRepository<FieldMappingEntity
         String sourceColumn,
         String targetFieldPath
     );
+
+    /**
+     * Find a mapping by ID and schema version.
+     *
+     * @param id mapping ID
+     * @param formVersionId schema version ID
+     * @return matching mapping if present
+     */
+    Optional<FieldMappingEntity> findByIdAndFormVersionId(Long id, String formVersionId);
 
     /**
      * Find all mappings ordered by processing order.

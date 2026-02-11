@@ -28,6 +28,16 @@ public interface OrderVersionIndexRepository extends MongoRepository<OrderVersio
     Optional<OrderVersionIndex> findByOrderIdAndIsLatestVersionTrue(String orderId);
 
     /**
+     * Find the index entry with the highest version number for an order.
+     * This query supports append-only versioning where latest is derived
+     * from version number ordering rather than mutable flags.
+     *
+     * @param orderId the business key of the order
+     * @return Optional containing the highest version index
+     */
+    Optional<OrderVersionIndex> findTopByOrderIdOrderByOrderVersionNumberDesc(String orderId);
+
+    /**
      * Find a specific version index.
      *
      * @param orderId the business key of the order
@@ -110,4 +120,29 @@ public interface OrderVersionIndexRepository extends MongoRepository<OrderVersio
      * @return count of versions with specified status
      */
     Long countByOrderIdAndOrderStatus(String orderId, OrderStatus orderStatus);
+
+    /**
+     * List latest order snapshot per order ID with version counts.
+     *
+     * @return latest order summaries sorted by timestamp descending
+     */
+    @Aggregation(pipeline = {
+        "{ $sort: { 'orderId': 1, 'orderVersionNumber': -1, 'timestamp': -1 } }",
+        "{ $group: { " +
+        "    _id: '$orderId', " +
+        "    orderId: { $first: '$orderId' }, " +
+        "    latestVersionNumber: { $first: '$orderVersionNumber' }, " +
+        "    formVersionId: { $first: '$formVersionId' }, " +
+        "    orderStatus: { $first: '$orderStatus' }, " +
+        "    userName: { $first: '$userName' }, " +
+        "    timestamp: { $first: '$timestamp' }, " +
+        "    changeDescription: { $first: '$changeDescription' }, " +
+        "    totalVersions: { $sum: 1 }, " +
+        "    committedVersions: { $sum: { $cond: [ { $eq: ['$orderStatus', 'COMMITTED'] }, 1, 0 ] } }, " +
+        "    wipVersions: { $sum: { $cond: [ { $eq: ['$orderStatus', 'WIP'] }, 1, 0 ] } } " +
+        "} }",
+        "{ $project: { _id: 0, orderId: 1, latestVersionNumber: 1, formVersionId: 1, orderStatus: 1, userName: 1, timestamp: 1, changeDescription: 1, totalVersions: 1, committedVersions: 1, wipVersions: 1 } }",
+        "{ $sort: { 'timestamp': -1 } }"
+    })
+    List<OrderLatestSummaryProjection> findLatestOrderSummaries();
 }

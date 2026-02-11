@@ -1,15 +1,18 @@
 package com.dynamicform.form.service;
 
 import com.dynamicform.form.common.dto.CreateOrderRequest;
+import com.dynamicform.form.common.dto.OrderSummaryResponse;
 import com.dynamicform.form.common.dto.OrderVersionHistoryResponse;
 import com.dynamicform.form.common.dto.OrderVersionResponse;
 import com.dynamicform.form.common.dto.VersionSummaryDTO;
 import com.dynamicform.form.common.enums.OrderStatus;
 import com.dynamicform.form.common.exception.OrderNotFoundException;
 import com.dynamicform.form.common.exception.SchemaNotFoundException;
+import com.dynamicform.form.common.exception.ValidationException;
 import com.dynamicform.form.entity.mongo.OrderVersionIndex;
 import com.dynamicform.form.entity.mongo.OrderVersionedDocument;
 import com.dynamicform.form.entity.postgres.FormSchemaEntity;
+import com.dynamicform.form.repository.mongo.OrderLatestSummaryProjection;
 import com.dynamicform.form.repository.mongo.OrderVersionIndexRepository;
 import com.dynamicform.form.repository.mongo.OrderVersionedRepository;
 import com.dynamicform.form.repository.postgres.FormSchemaRepository;
@@ -19,7 +22,9 @@ import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
 import java.time.LocalDateTime;
+import java.util.Comparator;
 import java.util.List;
+import java.util.Map;
 import java.util.Optional;
 import java.util.stream.Collectors;
 
@@ -44,6 +49,17 @@ public class VersionOrchestrationService {
     private final FormSchemaRepository formSchemaRepository;
 
     /**
+     * List latest order snapshot for all orders.
+     *
+     * @return list of latest order summaries
+     */
+    public List<OrderSummaryResponse> listLatestOrders() {
+        return orderVersionIndexRepository.findLatestOrderSummaries().stream()
+            .map(this::mapToOrderSummary)
+            .collect(Collectors.toList());
+    }
+
+    /**
      * Create a new version of an order.
      *
      * Algorithm:
@@ -52,9 +68,8 @@ public class VersionOrchestrationService {
      * 3. Create new OrderVersionedDocument
      * 4. Set status (WIP or COMMITTED based on finalSave flag)
      * 5. Save to orders_versioned collection
-     * 6. Update isLatestVersion flag on previous version
-     * 7. Create corresponding OrderVersionIndex entry
-     * 8. Return response DTO
+     * 6. Create corresponding OrderVersionIndex entry
+     * 7. Return response DTO
      *
      * @param request the order creation request
      * @param userName the user creating this version (from security context)
@@ -75,7 +90,7 @@ public class VersionOrchestrationService {
 
         // Step 2: Determine next version number
         Optional<OrderVersionIndex> latestVersionIndex =
-            orderVersionIndexRepository.findByOrderIdAndIsLatestVersionTrue(request.getOrderId());
+            orderVersionIndexRepository.findTopByOrderIdOrderByOrderVersionNumberDesc(request.getOrderId());
 
         int newVersionNumber;
         Integer previousVersionNumber = null;
@@ -114,48 +129,11 @@ public class VersionOrchestrationService {
         log.info("Saved version {} for orderId: {} with status: {}",
                  newVersionNumber, request.getOrderId(), orderStatus);
 
-        // Step 6: Update isLatestVersion flag on previous version
-        if (latestVersionIndex.isPresent()) {
-            updatePreviousVersionFlag(request.getOrderId(), previousVersionNumber);
-        }
-
-        // Step 7: Create index entry
+        // Step 6: Create index entry
         createVersionIndex(savedDocument);
 
-        // Step 8: Return response DTO
-        return mapToResponse(savedDocument);
-    }
-
-    /**
-     * Update isLatestVersion flag on the previous version.
-     * Sets isLatestVersion = false for the old latest version.
-     *
-     * @param orderId the order ID
-     * @param previousVersionNumber the version to update
-     */
-    private void updatePreviousVersionFlag(String orderId, Integer previousVersionNumber) {
-        log.debug("Updating isLatestVersion flag for orderId: {}, version: {}",
-                 orderId, previousVersionNumber);
-
-        Optional<OrderVersionedDocument> previousDoc =
-            orderVersionedRepository.findByOrderIdAndOrderVersionNumber(orderId, previousVersionNumber);
-
-        if (previousDoc.isPresent()) {
-            OrderVersionedDocument doc = previousDoc.get();
-            doc.setIsLatestVersion(false);
-            orderVersionedRepository.save(doc);
-            log.debug("Updated previous version {} to isLatestVersion = false", previousVersionNumber);
-        }
-
-        // Also update the index
-        Optional<OrderVersionIndex> previousIndex =
-            orderVersionIndexRepository.findByOrderIdAndOrderVersionNumber(orderId, previousVersionNumber);
-
-        if (previousIndex.isPresent()) {
-            OrderVersionIndex index = previousIndex.get();
-            index.setIsLatestVersion(false);
-            orderVersionIndexRepository.save(index);
-        }
+        // Step 7: Return response DTO
+        return mapToResponse(savedDocument, true);
     }
 
     /**
@@ -212,10 +190,10 @@ public class VersionOrchestrationService {
         log.debug("Fetching latest version for orderId: {}", orderId);
 
         OrderVersionedDocument document = orderVersionedRepository
-            .findByOrderIdAndIsLatestVersionTrue(orderId)
+            .findTopByOrderIdOrderByOrderVersionNumberDesc(orderId)
             .orElseThrow(() -> new OrderNotFoundException(orderId));
 
-        return mapToResponse(document);
+        return mapToResponse(document, true);
     }
 
     /**
@@ -233,7 +211,12 @@ public class VersionOrchestrationService {
             .findByOrderIdAndOrderVersionNumber(orderId, versionNumber)
             .orElseThrow(() -> new OrderNotFoundException(orderId, versionNumber));
 
-        return mapToResponse(document);
+        Integer latestVersionNumber = getLatestVersionNumber(orderId);
+        boolean isLatest = latestVersionNumber != null
+            && versionNumber != null
+            && versionNumber.equals(latestVersionNumber);
+
+        return mapToResponse(document, isLatest);
     }
 
     /**
@@ -253,8 +236,14 @@ public class VersionOrchestrationService {
             throw new OrderNotFoundException(orderId);
         }
 
+        Integer latestVersionNumber = indexes.stream()
+            .map(OrderVersionIndex::getOrderVersionNumber)
+            .filter(version -> version != null)
+            .max(Comparator.naturalOrder())
+            .orElse(null);
+
         List<VersionSummaryDTO> versions = indexes.stream()
-            .map(this::mapToSummaryDTO)
+            .map(index -> mapToSummaryDTO(index, latestVersionNumber))
             .collect(Collectors.toList());
 
         long committedCount = versions.stream()
@@ -283,12 +272,101 @@ public class VersionOrchestrationService {
     public List<OrderVersionResponse> getCommittedVersions(String orderId) {
         log.debug("Fetching committed versions for orderId: {}", orderId);
 
+        Integer latestVersionNumber = getLatestVersionNumber(orderId);
+
         List<OrderVersionedDocument> documents = orderVersionedRepository
             .findCommittedVersions(orderId);
 
         return documents.stream()
-            .map(this::mapToResponse)
+            .sorted(Comparator.comparing(OrderVersionedDocument::getOrderVersionNumber))
+            .map(document -> mapToResponse(
+                document,
+                latestVersionNumber != null
+                    && latestVersionNumber.equals(document.getOrderVersionNumber())
+            ))
             .collect(Collectors.toList());
+    }
+
+    /**
+     * Promote a specific WIP version to a new committed version.
+     *
+     * This operation is immutable: it creates a brand-new committed version
+     * based on the selected WIP version data.
+     *
+     * @param orderId order ID
+     * @param sourceVersionNumber source WIP version number
+     * @param userName current user
+     * @param changeDescription optional change description
+     * @return newly created committed version
+     */
+    @Transactional
+    public OrderVersionResponse promoteWipVersion(
+            String orderId,
+            Integer sourceVersionNumber,
+            String userName,
+            String changeDescription) {
+        log.info(
+            "Promoting WIP version. orderId={}, sourceVersion={}, user={}",
+            orderId,
+            sourceVersionNumber,
+            userName
+        );
+
+        OrderVersionedDocument sourceDocument = orderVersionedRepository
+            .findByOrderIdAndOrderVersionNumber(orderId, sourceVersionNumber)
+            .orElseThrow(() -> new OrderNotFoundException(orderId, sourceVersionNumber));
+
+        if (sourceDocument.getOrderStatus() != OrderStatus.WIP) {
+            throw new ValidationException(
+                String.format(
+                    "Only WIP versions can be promoted. orderId=%s, version=%d is %s",
+                    orderId,
+                    sourceVersionNumber,
+                    sourceDocument.getOrderStatus()
+                )
+            );
+        }
+
+        Optional<OrderVersionIndex> latestVersionIndex =
+            orderVersionIndexRepository.findTopByOrderIdOrderByOrderVersionNumberDesc(orderId);
+
+        int newVersionNumber = latestVersionIndex
+            .map(index -> index.getOrderVersionNumber() + 1)
+            .orElse(1);
+
+        Integer previousVersionNumber = latestVersionIndex
+            .map(OrderVersionIndex::getOrderVersionNumber)
+            .orElse(null);
+
+        Map<String, Object> sourceData = sourceDocument.getOrderData();
+        String effectiveChangeDescription = changeDescription != null && !changeDescription.isBlank()
+            ? changeDescription
+            : String.format("Promoted from WIP version %d", sourceVersionNumber);
+
+        OrderVersionedDocument promotedDocument = OrderVersionedDocument.builder()
+            .orderId(orderId)
+            .orderVersionNumber(newVersionNumber)
+            .formVersionId(sourceDocument.getFormVersionId())
+            .orderStatus(OrderStatus.COMMITTED)
+            .userName(userName)
+            .timestamp(LocalDateTime.now())
+            .isLatestVersion(true)
+            .previousVersionNumber(previousVersionNumber)
+            .changeDescription(effectiveChangeDescription)
+            .orderData(sourceData)
+            .build();
+
+        OrderVersionedDocument savedDocument = orderVersionedRepository.save(promotedDocument);
+        createVersionIndex(savedDocument);
+
+        log.info(
+            "Promoted WIP version {} to committed version {} for orderId={}",
+            sourceVersionNumber,
+            newVersionNumber,
+            orderId
+        );
+
+        return mapToResponse(savedDocument, true);
     }
 
     /**
@@ -297,7 +375,7 @@ public class VersionOrchestrationService {
      * @param document the entity
      * @return OrderVersionResponse DTO
      */
-    private OrderVersionResponse mapToResponse(OrderVersionedDocument document) {
+    private OrderVersionResponse mapToResponse(OrderVersionedDocument document, boolean isLatestVersion) {
         return OrderVersionResponse.builder()
             .orderId(document.getOrderId())
             .orderVersionNumber(document.getOrderVersionNumber())
@@ -305,7 +383,7 @@ public class VersionOrchestrationService {
             .orderStatus(document.getOrderStatus())
             .userName(document.getUserName())
             .timestamp(document.getTimestamp())
-            .isLatestVersion(document.getIsLatestVersion())
+            .isLatestVersion(isLatestVersion)
             .previousVersionNumber(document.getPreviousVersionNumber())
             .changeDescription(document.getChangeDescription())
             .data(document.getOrderData())
@@ -318,7 +396,7 @@ public class VersionOrchestrationService {
      * @param index the index entity
      * @return VersionSummaryDTO
      */
-    private VersionSummaryDTO mapToSummaryDTO(OrderVersionIndex index) {
+    private VersionSummaryDTO mapToSummaryDTO(OrderVersionIndex index, Integer latestVersionNumber) {
         return VersionSummaryDTO.builder()
             .orderId(index.getOrderId())
             .orderVersionNumber(index.getOrderVersionNumber())
@@ -326,8 +404,38 @@ public class VersionOrchestrationService {
             .orderStatus(index.getOrderStatus())
             .userName(index.getUserName())
             .timestamp(index.getTimestamp())
-            .isLatestVersion(index.getIsLatestVersion())
+            .isLatestVersion(
+                latestVersionNumber != null
+                    && latestVersionNumber.equals(index.getOrderVersionNumber())
+            )
             .changeDescription(index.getChangeDescription())
+            .build();
+    }
+
+    /**
+     * Resolve latest version number using descending version ordering.
+     *
+     * @param orderId the order ID
+     * @return latest version number or null when no versions exist
+     */
+    private Integer getLatestVersionNumber(String orderId) {
+        return orderVersionIndexRepository.findTopByOrderIdOrderByOrderVersionNumberDesc(orderId)
+            .map(OrderVersionIndex::getOrderVersionNumber)
+            .orElse(null);
+    }
+
+    private OrderSummaryResponse mapToOrderSummary(OrderLatestSummaryProjection projection) {
+        return OrderSummaryResponse.builder()
+            .orderId(projection.getOrderId())
+            .latestVersionNumber(projection.getLatestVersionNumber())
+            .formVersionId(projection.getFormVersionId())
+            .orderStatus(projection.getOrderStatus())
+            .userName(projection.getUserName())
+            .timestamp(projection.getTimestamp())
+            .changeDescription(projection.getChangeDescription())
+            .totalVersions(projection.getTotalVersions())
+            .committedVersions(projection.getCommittedVersions())
+            .wipVersions(projection.getWipVersions())
             .build();
     }
 }

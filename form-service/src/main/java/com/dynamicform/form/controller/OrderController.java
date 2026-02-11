@@ -1,8 +1,13 @@
 package com.dynamicform.form.controller;
 
 import com.dynamicform.form.common.dto.CreateOrderRequest;
+import com.dynamicform.form.common.dto.OrderSummaryResponse;
 import com.dynamicform.form.common.dto.OrderVersionHistoryResponse;
 import com.dynamicform.form.common.dto.OrderVersionResponse;
+import com.dynamicform.form.common.dto.PromoteVersionRequest;
+import com.dynamicform.form.common.dto.SchemaResponse;
+import com.dynamicform.form.service.DataTransformationService;
+import com.dynamicform.form.service.SchemaManagementService;
 import com.dynamicform.form.service.VersionOrchestrationService;
 import io.swagger.v3.oas.annotations.Operation;
 import io.swagger.v3.oas.annotations.Parameter;
@@ -23,11 +28,13 @@ import org.springframework.web.bind.annotation.PathVariable;
 import org.springframework.web.bind.annotation.PostMapping;
 import org.springframework.web.bind.annotation.RequestBody;
 import org.springframework.web.bind.annotation.RequestMapping;
+import org.springframework.web.bind.annotation.RequestParam;
 import org.springframework.web.bind.annotation.ResponseStatus;
 import org.springframework.web.bind.annotation.RestController;
 
 import java.net.URI;
 import java.util.List;
+import java.util.Map;
 
 /**
  * REST controller for order management operations.
@@ -50,6 +57,27 @@ import java.util.List;
 public class OrderController {
 
     private final VersionOrchestrationService versionOrchestrationService;
+    private final DataTransformationService dataTransformationService;
+    private final SchemaManagementService schemaManagementService;
+
+    /**
+     * List latest order snapshot for all orders.
+     *
+     * @return list of latest order summaries
+     */
+    @GetMapping
+    @Operation(
+        summary = "List all orders",
+        description = "Returns one latest snapshot per order with version counters."
+    )
+    @ApiResponses(value = {
+        @ApiResponse(responseCode = "200", description = "Order list returned"),
+        @ApiResponse(responseCode = "401", description = "Unauthorized")
+    })
+    public ResponseEntity<List<OrderSummaryResponse>> listOrders() {
+        log.info("GET /v1/orders - Fetching latest order snapshots");
+        return ResponseEntity.ok(versionOrchestrationService.listLatestOrders());
+    }
 
     /**
      * Create a new version of an order.
@@ -154,6 +182,50 @@ public class OrderController {
     }
 
     /**
+     * Promote a specific WIP version to a new committed version.
+     *
+     * This action creates a new immutable committed version and keeps
+     * original WIP versions untouched.
+     *
+     * @param orderId order ID
+     * @param versionNumber source WIP version number
+     * @param request optional change description
+     * @return newly created committed version
+     */
+    @PostMapping("/{orderId}/versions/{versionNumber}/promote")
+    @Operation(
+        summary = "Promote WIP version",
+        description = "Promotes a WIP version by creating a new committed version from it."
+    )
+    @ApiResponses(value = {
+        @ApiResponse(responseCode = "201", description = "WIP version promoted"),
+        @ApiResponse(responseCode = "400", description = "Version is not WIP or invalid request"),
+        @ApiResponse(responseCode = "404", description = "Order/version not found"),
+        @ApiResponse(responseCode = "401", description = "Unauthorized")
+    })
+    public ResponseEntity<OrderVersionResponse> promoteWipVersion(
+            @Parameter(description = "Order ID", example = "ORD-12345")
+            @PathVariable String orderId,
+            @Parameter(description = "WIP version number to promote", example = "3")
+            @PathVariable @Min(1) Integer versionNumber,
+            @RequestBody(required = false) PromoteVersionRequest request) {
+
+        log.info("POST /v1/orders/{}/versions/{}/promote - Promoting WIP version", orderId, versionNumber);
+        String userName = getCurrentUsername();
+        String changeDescription = request != null ? request.getChangeDescription() : null;
+
+        OrderVersionResponse response = versionOrchestrationService.promoteWipVersion(
+            orderId,
+            versionNumber,
+            userName,
+            changeDescription
+        );
+
+        URI location = URI.create("/v1/orders/" + orderId + "/versions/" + response.getOrderVersionNumber());
+        return ResponseEntity.created(location).body(response);
+    }
+
+    /**
      * Get complete version history for an order.
      *
      * Returns all versions (both WIP and COMMITTED) with summary information.
@@ -209,6 +281,88 @@ public class OrderController {
 
         List<OrderVersionResponse> response = versionOrchestrationService.getCommittedVersions(orderId);
         return ResponseEntity.ok(response);
+    }
+
+    /**
+     * Prefill order data from dimensional tables using configured field mappings.
+     *
+     * This endpoint helps populate dynamic JSON form payloads from existing SQL tables.
+     * If formVersionId is omitted, the currently active schema version is used.
+     *
+     * @param sourceTable source dimensional table name
+     * @param sourceKeyColumn source table key column
+     * @param sourceKeyValue source key value
+     * @param formVersionId optional form schema version
+     * @return transformed JSON payload map
+     */
+    @GetMapping("/prefill")
+    @Operation(
+        summary = "Prefill from dimensional tables",
+        description = "Transforms dimensional-table data into JSON payload format using field mappings."
+    )
+    @ApiResponses(value = {
+        @ApiResponse(responseCode = "200", description = "Prefill data generated"),
+        @ApiResponse(responseCode = "400", description = "Invalid request parameters"),
+        @ApiResponse(responseCode = "401", description = "Unauthorized"),
+        @ApiResponse(responseCode = "404", description = "Active schema or mapping not found")
+    })
+    public ResponseEntity<Map<String, Object>> prefillFromDimensional(
+            @Parameter(description = "Source dimensional table", example = "delivery_companies")
+            @RequestParam String sourceTable,
+            @Parameter(description = "Source key column", example = "company_id")
+            @RequestParam String sourceKeyColumn,
+            @Parameter(description = "Source key value", example = "DC-001")
+            @RequestParam String sourceKeyValue,
+            @Parameter(description = "Optional form version ID. If missing, active schema is used.", example = "v1.0.0")
+            @RequestParam(required = false) String formVersionId) {
+
+        String effectiveFormVersionId = formVersionId;
+        if (effectiveFormVersionId == null || effectiveFormVersionId.isBlank()) {
+            SchemaResponse activeSchema = schemaManagementService.getActiveSchema();
+            effectiveFormVersionId = activeSchema.getFormVersionId();
+        }
+
+        Map<String, Object> transformedData = dataTransformationService.transformDimensionalToJSON(
+            effectiveFormVersionId,
+            sourceTable,
+            sourceKeyColumn,
+            sourceKeyValue
+        );
+
+        return ResponseEntity.ok(transformedData);
+    }
+
+    /**
+     * List available prefill mappings for a schema version.
+     *
+     * UI can use this endpoint to show valid source tables and key-column suggestions
+     * instead of hardcoded prefill defaults.
+     *
+     * @param formVersionId optional form version ID. Active schema is used when omitted.
+     * @return grouped mapping metadata by source table
+     */
+    @GetMapping("/prefill/mappings")
+    @Operation(
+        summary = "List prefill mapping options",
+        description = "Returns available active field mappings grouped by source table for the selected schema version."
+    )
+    @ApiResponses(value = {
+        @ApiResponse(responseCode = "200", description = "Mapping options returned"),
+        @ApiResponse(responseCode = "401", description = "Unauthorized"),
+        @ApiResponse(responseCode = "404", description = "Active schema not found")
+    })
+    public ResponseEntity<Map<String, Object>> getPrefillMappings(
+            @Parameter(description = "Optional form version ID. If missing, active schema is used.", example = "v1.0.0")
+            @RequestParam(required = false) String formVersionId) {
+
+        String effectiveFormVersionId = formVersionId;
+        if (effectiveFormVersionId == null || effectiveFormVersionId.isBlank()) {
+            SchemaResponse activeSchema = schemaManagementService.getActiveSchema();
+            effectiveFormVersionId = activeSchema.getFormVersionId();
+        }
+
+        Map<String, Object> mappingOptions = dataTransformationService.listPrefillMappings(effectiveFormVersionId);
+        return ResponseEntity.ok(mappingOptions);
     }
 
     /**

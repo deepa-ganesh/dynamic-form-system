@@ -29,6 +29,16 @@ public interface OrderVersionedRepository extends MongoRepository<OrderVersioned
     Optional<OrderVersionedDocument> findByOrderIdAndIsLatestVersionTrue(String orderId);
 
     /**
+     * Find the version with the highest version number for an order.
+     * This query is used as the source of truth for latest-version lookups
+     * in insert-only mode where previous documents are never updated.
+     *
+     * @param orderId the business key of the order
+     * @return Optional containing the highest version, or empty if not found
+     */
+    Optional<OrderVersionedDocument> findTopByOrderIdOrderByOrderVersionNumberDesc(String orderId);
+
+    /**
      * Find a specific version of an order.
      *
      * @param orderId the business key of the order

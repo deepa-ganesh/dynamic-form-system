@@ -3,6 +3,7 @@ import { Navigate, Route, Routes } from "react-router-dom";
 import { AlertCircle, CheckCircle2, X } from "lucide-react";
 import Dashboard from "./components/Dashboard";
 import OrderForm from "./components/OrderForm";
+import OrdersList from "./components/OrdersList";
 import VersionHistory from "./components/VersionHistory";
 import SchemaManager from "./components/SchemaManager";
 
@@ -68,6 +69,7 @@ export default function App() {
         <Route path="/" element={<Dashboard />}>
           <Route index element={<Navigate to="/orders" replace />} />
           <Route path="orders" element={<OrderForm onNotify={notify} />} />
+          <Route path="orders-list" element={<OrdersList onNotify={notify} />} />
           <Route path="history" element={<VersionHistory onNotify={notify} />} />
           <Route path="schemas" element={<SchemaManager onNotify={notify} />} />
         </Route>

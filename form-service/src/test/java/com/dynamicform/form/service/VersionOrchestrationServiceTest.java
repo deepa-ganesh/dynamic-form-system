@@ -16,7 +16,6 @@ import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.extension.ExtendWith;
-import org.mockito.ArgumentCaptor;
 import org.mockito.InjectMocks;
 import org.mockito.Mock;
 import org.mockito.junit.jupiter.MockitoExtension;
@@ -29,7 +28,7 @@ import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.anyString;
-import static org.mockito.Mockito.atLeast;
+import static org.mockito.Mockito.never;
 import static org.mockito.Mockito.times;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
@@ -85,7 +84,7 @@ class VersionOrchestrationServiceTest {
     void shouldCreateFirstVersion() {
         // Arrange
         when(formSchemaRepository.findByIsActiveTrue()).thenReturn(Optional.of(activeSchema));
-        when(orderVersionIndexRepository.findByOrderIdAndIsLatestVersionTrue(anyString()))
+        when(orderVersionIndexRepository.findTopByOrderIdOrderByOrderVersionNumberDesc(anyString()))
             .thenReturn(Optional.empty());
 
         OrderVersionedDocument savedDoc = OrderVersionedDocument.builder()
@@ -116,7 +115,7 @@ class VersionOrchestrationServiceTest {
     }
 
     @Test
-    @DisplayName("Should create version 2 and update previous version flag")
+    @DisplayName("Should create version 2 in insert-only mode")
     void shouldCreateSecondVersion() {
         // Arrange
         when(formSchemaRepository.findByIsActiveTrue()).thenReturn(Optional.of(activeSchema));
@@ -126,18 +125,7 @@ class VersionOrchestrationServiceTest {
             .orderVersionNumber(1)
             .isLatestVersion(true)
             .build();
-        when(orderVersionIndexRepository.findByOrderIdAndIsLatestVersionTrue("ORD-12345"))
-            .thenReturn(Optional.of(existingIndex));
-
-        OrderVersionedDocument existingDoc = OrderVersionedDocument.builder()
-            .id("mongo-id-1")
-            .orderId("ORD-12345")
-            .orderVersionNumber(1)
-            .isLatestVersion(true)
-            .build();
-        when(orderVersionedRepository.findByOrderIdAndOrderVersionNumber("ORD-12345", 1))
-            .thenReturn(Optional.of(existingDoc));
-        when(orderVersionIndexRepository.findByOrderIdAndOrderVersionNumber("ORD-12345", 1))
+        when(orderVersionIndexRepository.findTopByOrderIdOrderByOrderVersionNumberDesc("ORD-12345"))
             .thenReturn(Optional.of(existingIndex));
 
         OrderVersionedDocument savedDoc = OrderVersionedDocument.builder()
@@ -160,17 +148,9 @@ class VersionOrchestrationServiceTest {
         assertThat(response.getOrderVersionNumber()).isEqualTo(2);
         assertThat(response.getPreviousVersionNumber()).isEqualTo(1);
         assertThat(response.getIsLatestVersion()).isTrue();
-
-        ArgumentCaptor<OrderVersionedDocument> docCaptor =
-            ArgumentCaptor.forClass(OrderVersionedDocument.class);
-        verify(orderVersionedRepository, atLeast(2)).save(docCaptor.capture());
-
-        List<OrderVersionedDocument> savedDocs = docCaptor.getAllValues();
-        boolean foundUpdatedV1 = savedDocs.stream()
-            .anyMatch(doc -> doc.getOrderVersionNumber() != null
-                && doc.getOrderVersionNumber() == 1
-                && !doc.getIsLatestVersion());
-        assertThat(foundUpdatedV1).isTrue();
+        verify(orderVersionedRepository, times(1)).save(any(OrderVersionedDocument.class));
+        verify(orderVersionedRepository, never())
+            .findByOrderIdAndOrderVersionNumber("ORD-12345", 1);
     }
 
     @Test
@@ -180,7 +160,7 @@ class VersionOrchestrationServiceTest {
         createRequest.setFinalSave(true);
 
         when(formSchemaRepository.findByIsActiveTrue()).thenReturn(Optional.of(activeSchema));
-        when(orderVersionIndexRepository.findByOrderIdAndIsLatestVersionTrue(anyString()))
+        when(orderVersionIndexRepository.findTopByOrderIdOrderByOrderVersionNumberDesc(anyString()))
             .thenReturn(Optional.empty());
 
         OrderVersionedDocument savedDoc = OrderVersionedDocument.builder()
@@ -229,7 +209,7 @@ class VersionOrchestrationServiceTest {
             .orderData(Map.of("field1", "value1"))
             .build();
 
-        when(orderVersionedRepository.findByOrderIdAndIsLatestVersionTrue("ORD-12345"))
+        when(orderVersionedRepository.findTopByOrderIdOrderByOrderVersionNumberDesc("ORD-12345"))
             .thenReturn(Optional.of(doc));
 
         // Act
@@ -245,7 +225,7 @@ class VersionOrchestrationServiceTest {
     @DisplayName("Should throw OrderNotFoundException when order does not exist")
     void shouldThrowExceptionWhenOrderNotFound() {
         // Arrange
-        when(orderVersionedRepository.findByOrderIdAndIsLatestVersionTrue("ORD-99999"))
+        when(orderVersionedRepository.findTopByOrderIdOrderByOrderVersionNumberDesc("ORD-99999"))
             .thenReturn(Optional.empty());
 
         // Act & Assert

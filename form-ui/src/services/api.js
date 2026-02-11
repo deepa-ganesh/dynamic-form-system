@@ -89,6 +89,34 @@ async function callApi(promise) {
 
 export const createOrder = (payload) => callApi(api.post("/v1/orders", payload));
 
+export const getAllOrders = () => callApi(api.get("/v1/orders"));
+
+export const prefillFromDimensional = ({
+  sourceTable,
+  sourceKeyColumn,
+  sourceKeyValue,
+  formVersionId
+}) =>
+  callApi(
+    api.get("/v1/orders/prefill", {
+      params: {
+        sourceTable,
+        sourceKeyColumn,
+        sourceKeyValue,
+        ...(formVersionId ? { formVersionId } : {})
+      }
+    })
+  );
+
+export const getPrefillMappings = (formVersionId) =>
+  callApi(
+    api.get("/v1/orders/prefill/mappings", {
+      params: {
+        ...(formVersionId ? { formVersionId } : {})
+      }
+    })
+  );
+
 export const getLatestVersion = (orderId) =>
   callApi(api.get(`/v1/orders/${encodeURIComponent(orderId)}`));
 
@@ -105,6 +133,14 @@ export const getSpecificVersion = (orderId, versionNumber) =>
 export const getCommittedVersions = (orderId) =>
   callApi(api.get(`/v1/orders/${encodeURIComponent(orderId)}/committed-versions`));
 
+export const promoteOrderVersion = (orderId, versionNumber, payload = {}) =>
+  callApi(
+    api.post(
+      `/v1/orders/${encodeURIComponent(orderId)}/versions/${encodeURIComponent(versionNumber)}/promote`,
+      payload
+    )
+  );
+
 export const getActiveSchema = () => callApi(api.get("/v1/schemas/active"));
 
 export const getAllSchemas = () => callApi(api.get("/v1/schemas"));
@@ -119,5 +155,26 @@ export const activateSchema = (formVersionId) =>
 
 export const deprecateSchema = (formVersionId) =>
   callApi(api.delete(`/v1/schemas/${encodeURIComponent(formVersionId)}`));
+
+export const getFieldMappings = (formVersionId) =>
+  callApi(api.get(`/v1/schemas/${encodeURIComponent(formVersionId)}/mappings`));
+
+export const createFieldMapping = (formVersionId, payload) =>
+  callApi(api.post(`/v1/schemas/${encodeURIComponent(formVersionId)}/mappings`, payload));
+
+export const updateFieldMapping = (formVersionId, mappingId, payload) =>
+  callApi(
+    api.put(
+      `/v1/schemas/${encodeURIComponent(formVersionId)}/mappings/${encodeURIComponent(mappingId)}`,
+      payload
+    )
+  );
+
+export const deleteFieldMapping = (formVersionId, mappingId) =>
+  callApi(
+    api.delete(
+      `/v1/schemas/${encodeURIComponent(formVersionId)}/mappings/${encodeURIComponent(mappingId)}`
+    )
+  );
 
 export default api;

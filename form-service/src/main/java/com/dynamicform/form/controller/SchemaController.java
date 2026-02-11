@@ -1,7 +1,10 @@
 package com.dynamicform.form.controller;
 
 import com.dynamicform.form.common.dto.CreateSchemaRequest;
+import com.dynamicform.form.common.dto.FieldMappingRequest;
+import com.dynamicform.form.common.dto.FieldMappingResponse;
 import com.dynamicform.form.common.dto.SchemaResponse;
+import com.dynamicform.form.service.FieldMappingManagementService;
 import com.dynamicform.form.service.SchemaManagementService;
 import io.swagger.v3.oas.annotations.Operation;
 import io.swagger.v3.oas.annotations.Parameter;
@@ -50,10 +53,11 @@ import java.util.List;
 @Validated
 @Slf4j
 @Tag(name = "Schema Management", description = "APIs for managing form schemas (Admin only)")
-@SecurityRequirement(name = "bearerAuth")
+@SecurityRequirement(name = "basicAuth")
 public class SchemaController {
 
     private final SchemaManagementService schemaManagementService;
+    private final FieldMappingManagementService fieldMappingManagementService;
 
     /**
      * Get the currently active form schema.
@@ -230,6 +234,134 @@ public class SchemaController {
         log.info("DELETE /v1/schemas/{} - Deprecating schema", formVersionId);
 
         schemaManagementService.deprecateSchema(formVersionId);
+        return ResponseEntity.noContent().build();
+    }
+
+    /**
+     * List field mappings for a schema version.
+     *
+     * @param formVersionId schema version ID
+     * @return list of field mappings
+     */
+    @GetMapping("/{formVersionId}/mappings")
+    @PreAuthorize("hasRole('ADMIN')")
+    @Operation(
+        summary = "Get field mappings for schema",
+        description = "Retrieves all field mappings for a schema version ordered by processing order."
+    )
+    @ApiResponses(value = {
+        @ApiResponse(responseCode = "200", description = "Mappings retrieved"),
+        @ApiResponse(responseCode = "401", description = "Unauthorized"),
+        @ApiResponse(responseCode = "404", description = "Schema not found")
+    })
+    public ResponseEntity<List<FieldMappingResponse>> getSchemaMappings(
+            @Parameter(description = "Form version ID", example = "v1.0.0")
+            @PathVariable String formVersionId) {
+
+        log.info("GET /v1/schemas/{}/mappings - Fetching field mappings", formVersionId);
+        List<FieldMappingResponse> response = fieldMappingManagementService.getMappingsBySchema(formVersionId);
+        return ResponseEntity.ok(response);
+    }
+
+    /**
+     * Create a field mapping for a schema.
+     *
+     * @param formVersionId schema version ID
+     * @param request create request
+     * @return created mapping
+     */
+    @PostMapping("/{formVersionId}/mappings")
+    @PreAuthorize("hasRole('ADMIN')")
+    @Operation(
+        summary = "Create field mapping",
+        description = "Creates a field mapping for dimensional-to-JSON transformation. Admin only."
+    )
+    @ApiResponses(value = {
+        @ApiResponse(responseCode = "201", description = "Field mapping created"),
+        @ApiResponse(responseCode = "400", description = "Invalid request data"),
+        @ApiResponse(responseCode = "401", description = "Unauthorized"),
+        @ApiResponse(responseCode = "403", description = "Forbidden - requires ADMIN role"),
+        @ApiResponse(responseCode = "404", description = "Schema not found")
+    })
+    public ResponseEntity<FieldMappingResponse> createSchemaMapping(
+            @Parameter(description = "Form version ID", example = "v1.0.0")
+            @PathVariable String formVersionId,
+            @Valid @RequestBody FieldMappingRequest request) {
+
+        log.info("POST /v1/schemas/{}/mappings - Creating field mapping", formVersionId);
+        FieldMappingResponse response = fieldMappingManagementService.createMapping(
+            formVersionId,
+            request,
+            getCurrentUsername()
+        );
+        URI location = URI.create("/v1/schemas/" + formVersionId + "/mappings/" + response.getId());
+        return ResponseEntity.created(location).body(response);
+    }
+
+    /**
+     * Update a field mapping for a schema.
+     *
+     * @param formVersionId schema version ID
+     * @param mappingId mapping ID
+     * @param request update request
+     * @return updated mapping
+     */
+    @PutMapping("/{formVersionId}/mappings/{mappingId}")
+    @PreAuthorize("hasRole('ADMIN')")
+    @Operation(
+        summary = "Update field mapping",
+        description = "Updates an existing field mapping for a schema version. Admin only."
+    )
+    @ApiResponses(value = {
+        @ApiResponse(responseCode = "200", description = "Field mapping updated"),
+        @ApiResponse(responseCode = "400", description = "Invalid request data"),
+        @ApiResponse(responseCode = "401", description = "Unauthorized"),
+        @ApiResponse(responseCode = "403", description = "Forbidden - requires ADMIN role"),
+        @ApiResponse(responseCode = "404", description = "Schema or mapping not found")
+    })
+    public ResponseEntity<FieldMappingResponse> updateSchemaMapping(
+            @Parameter(description = "Form version ID", example = "v1.0.0")
+            @PathVariable String formVersionId,
+            @Parameter(description = "Field mapping ID", example = "42")
+            @PathVariable Long mappingId,
+            @Valid @RequestBody FieldMappingRequest request) {
+
+        log.info("PUT /v1/schemas/{}/mappings/{} - Updating field mapping", formVersionId, mappingId);
+        FieldMappingResponse response = fieldMappingManagementService.updateMapping(
+            formVersionId,
+            mappingId,
+            request
+        );
+        return ResponseEntity.ok(response);
+    }
+
+    /**
+     * Delete a field mapping for a schema.
+     *
+     * @param formVersionId schema version ID
+     * @param mappingId mapping ID
+     * @return no content
+     */
+    @DeleteMapping("/{formVersionId}/mappings/{mappingId}")
+    @PreAuthorize("hasRole('ADMIN')")
+    @Operation(
+        summary = "Delete field mapping",
+        description = "Deletes a field mapping for a schema version. Admin only."
+    )
+    @ApiResponses(value = {
+        @ApiResponse(responseCode = "204", description = "Field mapping deleted"),
+        @ApiResponse(responseCode = "401", description = "Unauthorized"),
+        @ApiResponse(responseCode = "403", description = "Forbidden - requires ADMIN role"),
+        @ApiResponse(responseCode = "404", description = "Schema or mapping not found")
+    })
+    public ResponseEntity<Void> deleteSchemaMapping(
+            @Parameter(description = "Form version ID", example = "v1.0.0")
+            @PathVariable String formVersionId,
+            @Parameter(description = "Field mapping ID", example = "42")
+            @PathVariable Long mappingId) {
+
+        log.info("DELETE /v1/schemas/{}/mappings/{} - Deleting field mapping", formVersionId, mappingId);
+        fieldMappingManagementService.deleteMapping(formVersionId, mappingId);
         return ResponseEntity.noContent().build();
     }
 

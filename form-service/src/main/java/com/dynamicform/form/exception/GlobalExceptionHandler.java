@@ -1,6 +1,7 @@
 package com.dynamicform.form.exception;
 
 import com.dynamicform.form.common.dto.ErrorResponse;
+import com.dynamicform.form.common.exception.FieldMappingNotFoundException;
 import com.dynamicform.form.common.exception.OrderNotFoundException;
 import com.dynamicform.form.common.exception.SchemaNotFoundException;
 import com.dynamicform.form.common.exception.SchemaVersionException;
@@ -64,6 +65,27 @@ public class GlobalExceptionHandler {
             .timestamp(LocalDateTime.now())
             .status(HttpStatus.NOT_FOUND.value())
             .error("Schema Not Found")
+            .message(ex.getMessage())
+            .path(request.getDescription(false).replace("uri=", ""))
+            .build();
+
+        return ResponseEntity.status(HttpStatus.NOT_FOUND).body(error);
+    }
+
+    /**
+     * Handle FieldMappingNotFoundException.
+     * Returns 404 Not Found.
+     */
+    @ExceptionHandler(FieldMappingNotFoundException.class)
+    public ResponseEntity<ErrorResponse> handleFieldMappingNotFound(
+            FieldMappingNotFoundException ex, WebRequest request) {
+
+        log.error("Field mapping not found: {}", ex.getMessage());
+
+        ErrorResponse error = ErrorResponse.builder()
+            .timestamp(LocalDateTime.now())
+            .status(HttpStatus.NOT_FOUND.value())
+            .error("Field Mapping Not Found")
             .message(ex.getMessage())
             .path(request.getDescription(false).replace("uri=", ""))
             .build();
