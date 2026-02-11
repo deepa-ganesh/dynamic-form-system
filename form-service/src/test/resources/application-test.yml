@@ -1,0 +1,28 @@
+spring:
+  data:
+    mongodb:
+      uri: mongodb://localhost:27017/form_system_test
+
+  datasource:
+    url: jdbc:h2:mem:testdb
+    driver-class-name: org.h2.Driver
+    username: sa
+    password:
+
+  jpa:
+    hibernate:
+      ddl-auto: create-drop
+    show-sql: true
+
+  cache:
+    type: none
+
+  security:
+    user:
+      name: testuser
+      password: testpassword
+
+logging:
+  level:
+    com.morganstanley.form: DEBUG
+    org.springframework: WARN
