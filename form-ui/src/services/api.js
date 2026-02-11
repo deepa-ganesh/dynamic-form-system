@@ -1,18 +1,71 @@
 import axios from "axios";
 
 const API_BASE_URL = import.meta.env.VITE_API_BASE_URL || "http://localhost:8080/api";
-const API_USERNAME = import.meta.env.VITE_API_USERNAME || "admin";
-const API_PASSWORD = import.meta.env.VITE_API_PASSWORD || "admin";
+const DEMO_ROLE_STORAGE_KEY = "dynamicFormDemoRole";
 
-const basicToken = btoa(`${API_USERNAME}:${API_PASSWORD}`);
+export const DEMO_ROLES = {
+  USER: "USER",
+  ADMIN: "ADMIN"
+};
+
+const DEMO_CREDENTIALS = {
+  [DEMO_ROLES.USER]: {
+    username: "user",
+    password: "password"
+  },
+  [DEMO_ROLES.ADMIN]: {
+    username: import.meta.env.VITE_API_USERNAME || "admin",
+    password: import.meta.env.VITE_API_PASSWORD || "admin"
+  }
+};
+
+function toBasicToken(username, password) {
+  return btoa(`${username}:${password}`);
+}
+
+export function getDemoRole() {
+  const storedRole = window.localStorage.getItem(DEMO_ROLE_STORAGE_KEY);
+  if (storedRole === DEMO_ROLES.USER || storedRole === DEMO_ROLES.ADMIN) {
+    return storedRole;
+  }
+  return DEMO_ROLES.ADMIN;
+}
+
+export function setDemoRole(role) {
+  const safeRole = role === DEMO_ROLES.USER ? DEMO_ROLES.USER : DEMO_ROLES.ADMIN;
+  window.localStorage.setItem(DEMO_ROLE_STORAGE_KEY, safeRole);
+  window.dispatchEvent(
+    new CustomEvent("dynamic-form-demo-role-change", {
+      detail: safeRole
+    })
+  );
+}
+
+function getRoleCredentials(role) {
+  return DEMO_CREDENTIALS[role] || DEMO_CREDENTIALS[DEMO_ROLES.ADMIN];
+}
 
 const api = axios.create({
   baseURL: API_BASE_URL,
   timeout: 15000,
   headers: {
-    Authorization: `Basic ${basicToken}`,
     "Content-Type": "application/json"
   }
+});
+
+api.interceptors.request.use((config) => {
+  const role = getDemoRole();
+  const { username, password } = getRoleCredentials(role);
+
+  const headers = {
+    ...(config.headers || {}),
+    Authorization: `Basic ${toBasicToken(username, password)}`
+  };
+
+  return {
+    ...config,
+    headers
+  };
 });
 
 function normalizeError(error) {

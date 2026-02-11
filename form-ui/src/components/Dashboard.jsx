@@ -1,6 +1,7 @@
 import { useEffect, useState } from "react";
-import { NavLink, Outlet } from "react-router-dom";
+import { NavLink, Outlet, useLocation, useNavigate } from "react-router-dom";
 import { ClipboardList, FileDiff, History, Layers3 } from "lucide-react";
+import { DEMO_ROLES, getDemoRole, setDemoRole } from "../services/api";
 
 const navItems = [
   {
@@ -25,6 +26,9 @@ const navItems = [
 
 export default function Dashboard() {
   const [isCompact, setIsCompact] = useState(false);
+  const [demoRole, setDemoRoleState] = useState(DEMO_ROLES.ADMIN);
+  const location = useLocation();
+  const navigate = useNavigate();
 
   useEffect(() => {
     const COMPACT_ON_SCROLL_Y = 72;
@@ -50,6 +54,26 @@ export default function Dashboard() {
     };
   }, []);
 
+  useEffect(() => {
+    setDemoRoleState(getDemoRole());
+
+    const onRoleChange = (event) => {
+      const nextRole = event?.detail || getDemoRole();
+      setDemoRoleState(nextRole);
+    };
+
+    window.addEventListener("dynamic-form-demo-role-change", onRoleChange);
+    return () => {
+      window.removeEventListener("dynamic-form-demo-role-change", onRoleChange);
+    };
+  }, []);
+
+  useEffect(() => {
+    if (demoRole === DEMO_ROLES.USER && location.pathname.startsWith("/schemas")) {
+      navigate("/orders", { replace: true });
+    }
+  }, [demoRole, location.pathname, navigate]);
+
   return (
     <div className="relative min-h-screen text-slate-100">
       <div className="pointer-events-none fixed inset-0 -z-10 bg-gradient-to-br from-gray-900 via-blue-900 to-gray-900" />
@@ -69,12 +93,39 @@ export default function Dashboard() {
                   </h1>
                 </div>
                 <div
-                  className={`rounded-xl border border-slate-600 bg-slate-900/40 text-slate-300 transition-all duration-300 ${
+                  className={`flex flex-wrap items-center gap-2 rounded-xl border border-slate-600 bg-slate-900/40 text-slate-300 transition-all duration-300 ${
                     isCompact ? "px-3 py-1.5 text-[11px]" : "px-4 py-2 text-xs"
                   }`}
                 >
-                  Backend:{" "}
-                  <span className="font-semibold text-green-300">http://localhost:8080/api</span>
+                  <span>
+                    Backend:{" "}
+                    <span className="font-semibold text-green-300">http://localhost:8080/api</span>
+                  </span>
+                  <span className="mx-1 hidden text-slate-500 sm:inline">|</span>
+                  <div className="inline-flex items-center rounded-lg border border-slate-600 bg-slate-950/50 p-0.5">
+                    <button
+                      type="button"
+                      className={`rounded-md px-2 py-1 font-semibold transition ${
+                        demoRole === DEMO_ROLES.USER
+                          ? "bg-blue-600 text-white"
+                          : "text-slate-300 hover:bg-slate-800/80"
+                      }`}
+                      onClick={() => setDemoRole(DEMO_ROLES.USER)}
+                    >
+                      User
+                    </button>
+                    <button
+                      type="button"
+                      className={`rounded-md px-2 py-1 font-semibold transition ${
+                        demoRole === DEMO_ROLES.ADMIN
+                          ? "bg-blue-600 text-white"
+                          : "text-slate-300 hover:bg-slate-800/80"
+                      }`}
+                      onClick={() => setDemoRole(DEMO_ROLES.ADMIN)}
+                    >
+                      Admin
+                    </button>
+                  </div>
                 </div>
               </div>
             </header>
@@ -86,6 +137,32 @@ export default function Dashboard() {
             >
               {navItems.map((item) => {
                 const Icon = item.icon;
+                const isSchemaTab = item.to === "/schemas";
+                const isSchemaDisabled = isSchemaTab && demoRole !== DEMO_ROLES.ADMIN;
+
+                if (isSchemaDisabled) {
+                  return (
+                    <div
+                      key={item.to}
+                      className={`rounded-xl border border-slate-700 bg-slate-900/20 text-slate-400 transition-all duration-300 ${
+                        isCompact ? "px-3 py-2" : "px-4 py-3"
+                      } cursor-not-allowed opacity-55`}
+                      title="Switch to Admin role to access Schema Manager"
+                    >
+                      <div
+                        className={`flex items-center gap-2 font-semibold ${
+                          isCompact ? "text-xs" : "mb-1 text-sm"
+                        }`}
+                      >
+                        <Icon className={isCompact ? "h-3.5 w-3.5" : "h-4 w-4"} /> {item.label}
+                      </div>
+                      {!isCompact ? (
+                        <p className="text-xs text-slate-400">Admin role required</p>
+                      ) : null}
+                    </div>
+                  );
+                }
+
                 return (
                   <NavLink
                     key={item.to}

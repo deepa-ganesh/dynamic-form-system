@@ -16,6 +16,8 @@ import {
   activateSchema,
   createSchema,
   deprecateSchema,
+  DEMO_ROLES,
+  getDemoRole,
   getActiveSchema,
   getAllSchemas,
   getSchemaByVersionId
@@ -49,6 +51,7 @@ function formatDateTime(value) {
 export default function SchemaManager({ onNotify }) {
   const [activeSchema, setActiveSchema] = useState(null);
   const [schemas, setSchemas] = useState([]);
+  const [demoRole, setDemoRole] = useState(DEMO_ROLES.ADMIN);
   const [selectedSchemaDetails, setSelectedSchemaDetails] = useState(null);
   const [loadingSelectedDetails, setLoadingSelectedDetails] = useState(false);
   const [selectedSchemaVersionId, setSelectedSchemaVersionId] = useState("");
@@ -58,6 +61,7 @@ export default function SchemaManager({ onNotify }) {
   const [deprecatingId, setDeprecatingId] = useState("");
   const [isCreateModalOpen, setIsCreateModalOpen] = useState(false);
   const [error, setError] = useState("");
+  const isAdmin = demoRole === DEMO_ROLES.ADMIN;
 
   const [formData, setFormData] = useState({
     formVersionId: "",
@@ -117,7 +121,11 @@ export default function SchemaManager({ onNotify }) {
     setError("");
 
     try {
-      const [active, all] = await Promise.allSettled([getActiveSchema(), getAllSchemas()]);
+      const requests = [getActiveSchema()];
+      if (isAdmin) {
+        requests.push(getAllSchemas());
+      }
+      const [active, all] = await Promise.allSettled(requests);
 
       let activeValue = null;
       let allSchemas = [];
@@ -129,12 +137,17 @@ export default function SchemaManager({ onNotify }) {
         setActiveSchema(null);
       }
 
-      if (all.status === "fulfilled") {
-        allSchemas = all.value;
-        setSchemas(allSchemas);
+      if (isAdmin) {
+        if (all?.status === "fulfilled") {
+          allSchemas = all.value;
+          setSchemas(allSchemas);
+        } else {
+          setSchemas([]);
+          throw new Error(all?.reason?.message || "Unable to load schema list");
+        }
       } else {
-        setSchemas([]);
-        throw new Error(all.reason?.message || "Unable to load schema list");
+        allSchemas = activeValue ? [activeValue] : [];
+        setSchemas(allSchemas);
       }
 
       const preferredVersionId =
@@ -156,8 +169,22 @@ export default function SchemaManager({ onNotify }) {
   };
 
   useEffect(() => {
-    loadSchemas();
+    setDemoRole(getDemoRole());
+
+    const onRoleChange = (event) => {
+      const nextRole = event?.detail || getDemoRole();
+      setDemoRole(nextRole);
+    };
+
+    window.addEventListener("dynamic-form-demo-role-change", onRoleChange);
+    return () => {
+      window.removeEventListener("dynamic-form-demo-role-change", onRoleChange);
+    };
   }, []);
+
+  useEffect(() => {
+    loadSchemas();
+  }, [isAdmin]);
 
   useEffect(() => {
     if (!isCreateModalOpen) {
@@ -177,6 +204,12 @@ export default function SchemaManager({ onNotify }) {
   }, [isCreateModalOpen, submitting]);
 
   useEffect(() => {
+    if (!isAdmin && isCreateModalOpen) {
+      setIsCreateModalOpen(false);
+    }
+  }, [isAdmin, isCreateModalOpen]);
+
+  useEffect(() => {
     const previousOverflow = document.body.style.overflow;
 
     if (isCreateModalOpen) {
@@ -191,6 +224,9 @@ export default function SchemaManager({ onNotify }) {
   }, [isCreateModalOpen]);
 
   const openCreateModal = () => {
+    if (!isAdmin) {
+      return;
+    }
     setError("");
     setIsCreateModalOpen(true);
   };
@@ -234,6 +270,9 @@ export default function SchemaManager({ onNotify }) {
   };
 
   const handleActivate = async (formVersionId) => {
+    if (!isAdmin) {
+      return;
+    }
     setActivatingId(formVersionId);
     setError("");
 
@@ -255,6 +294,9 @@ export default function SchemaManager({ onNotify }) {
   };
 
   const handleDeprecate = async (schema) => {
+    if (!isAdmin) {
+      return;
+    }
     if (schema.isActive) {
       onNotify({
         type: "error",
@@ -314,7 +356,13 @@ export default function SchemaManager({ onNotify }) {
           <div className="rounded-xl border border-slate-700 bg-slate-900/40 p-4">
             <div className="mb-3 flex items-center justify-between gap-2">
               <h4 className="text-base font-semibold text-white">Schema Catalog</h4>
-              <button className="secondary-btn" type="button" onClick={openCreateModal}>
+              <button
+                className={`secondary-btn ${!isAdmin ? "cursor-not-allowed opacity-50" : ""}`}
+                type="button"
+                onClick={openCreateModal}
+                disabled={!isAdmin}
+                title={!isAdmin ? "Admin role required" : "Create new schema"}
+              >
                 <PlusCircle className="h-4 w-4" /> New
               </button>
             </div>
@@ -370,10 +418,11 @@ export default function SchemaManager({ onNotify }) {
 
                         {!isActive ? (
                           <button
-                            className="secondary-btn"
+                            className={`secondary-btn ${!isAdmin ? "cursor-not-allowed opacity-50" : ""}`}
                             type="button"
                             onClick={() => handleActivate(schema.formVersionId)}
-                            disabled={isBusy || isDeprecating}
+                            disabled={!isAdmin || isBusy || isDeprecating}
+                            title={!isAdmin ? "Admin role required" : "Activate schema"}
                           >
                             {isBusy ? <Loader2 className="h-4 w-4 animate-spin" /> : null}
                             Activate
@@ -382,10 +431,13 @@ export default function SchemaManager({ onNotify }) {
 
                         {!isActive ? (
                           <button
-                            className="secondary-btn border-red-500/50 bg-red-600/20 text-red-100 hover:bg-red-600/30"
+                            className={`secondary-btn border-red-500/50 bg-red-600/20 text-red-100 hover:bg-red-600/30 ${
+                              !isAdmin ? "cursor-not-allowed opacity-50" : ""
+                            }`}
                             type="button"
                             onClick={() => handleDeprecate(schema)}
-                            disabled={isBusy || isDeprecating}
+                            disabled={!isAdmin || isBusy || isDeprecating}
+                            title={!isAdmin ? "Admin role required" : "Deprecate schema"}
                           >
                             {isDeprecating ? (
                               <Loader2 className="h-4 w-4 animate-spin" />
@@ -543,7 +595,7 @@ export default function SchemaManager({ onNotify }) {
               <button
                 className="primary-btn"
                 type="button"
-                disabled={submitting}
+                disabled={!isAdmin || submitting}
                 onClick={handleCreateSchema}
               >
                 {submitting ? (
