@@ -1,12 +1,16 @@
 import { useEffect, useMemo, useState } from "react";
 import {
+  CalendarClock,
   CheckCircle2,
+  Copy,
   Eye,
   FileJson,
+  Info,
   Loader2,
   PlusCircle,
-  RefreshCcw,
-  Trash2
+  Trash2,
+  User2,
+  X
 } from "lucide-react";
 import {
   activateSchema,
@@ -33,6 +37,15 @@ const schemaTemplate = {
   ]
 };
 
+function formatDateTime(value) {
+  if (!value) {
+    return "-";
+  }
+
+  const date = new Date(value);
+  return Number.isNaN(date.getTime()) ? value : date.toLocaleString();
+}
+
 export default function SchemaManager({ onNotify }) {
   const [activeSchema, setActiveSchema] = useState(null);
   const [schemas, setSchemas] = useState([]);
@@ -43,6 +56,7 @@ export default function SchemaManager({ onNotify }) {
   const [submitting, setSubmitting] = useState(false);
   const [activatingId, setActivatingId] = useState("");
   const [deprecatingId, setDeprecatingId] = useState("");
+  const [isCreateModalOpen, setIsCreateModalOpen] = useState(false);
   const [error, setError] = useState("");
 
   const [formData, setFormData] = useState({
@@ -59,6 +73,19 @@ export default function SchemaManager({ onNotify }) {
       return bDate - aDate;
     });
   }, [schemas]);
+
+  const orderedSchemas = useMemo(() => {
+    const active = sortedSchemas.find((schema) => schema.isActive);
+    if (!active) {
+      return sortedSchemas;
+    }
+    return [active, ...sortedSchemas.filter((schema) => !schema.isActive)];
+  }, [sortedSchemas]);
+
+  const selectedFieldCount = useMemo(() => {
+    const fields = selectedSchemaDetails?.fieldDefinitions?.fields;
+    return Array.isArray(fields) ? fields.length : 0;
+  }, [selectedSchemaDetails]);
 
   const loadSchemaDetails = async (formVersionId, showErrorToast = true) => {
     if (!formVersionId) {
@@ -132,6 +159,42 @@ export default function SchemaManager({ onNotify }) {
     loadSchemas();
   }, []);
 
+  useEffect(() => {
+    if (!isCreateModalOpen) {
+      return;
+    }
+
+    const onKeyDown = (event) => {
+      if (event.key === "Escape" && !submitting) {
+        setIsCreateModalOpen(false);
+      }
+    };
+
+    window.addEventListener("keydown", onKeyDown);
+    return () => {
+      window.removeEventListener("keydown", onKeyDown);
+    };
+  }, [isCreateModalOpen, submitting]);
+
+  useEffect(() => {
+    const previousOverflow = document.body.style.overflow;
+
+    if (isCreateModalOpen) {
+      document.body.style.overflow = "hidden";
+    } else {
+      document.body.style.overflow = previousOverflow || "";
+    }
+
+    return () => {
+      document.body.style.overflow = previousOverflow || "";
+    };
+  }, [isCreateModalOpen]);
+
+  const openCreateModal = () => {
+    setError("");
+    setIsCreateModalOpen(true);
+  };
+
   const handleCreateSchema = async () => {
     setSubmitting(true);
     setError("");
@@ -158,6 +221,7 @@ export default function SchemaManager({ onNotify }) {
         description: ""
       }));
 
+      setIsCreateModalOpen(false);
       await loadSchemas();
       await loadSchemaDetails(response.formVersionId, false);
     } catch (apiError) {
@@ -221,8 +285,7 @@ export default function SchemaManager({ onNotify }) {
       await loadSchemas();
 
       if (selectedSchemaVersionId === schema.formVersionId) {
-        const fallback = activeSchema?.formVersionId || "";
-        await loadSchemaDetails(fallback, false);
+        await loadSchemaDetails(activeSchema?.formVersionId || "", false);
       }
     } catch (apiError) {
       const message = apiError.message || "Unable to deprecate schema";
@@ -233,224 +296,267 @@ export default function SchemaManager({ onNotify }) {
     }
   };
 
+  const copySchemaJson = async () => {
+    if (!selectedSchemaDetails?.fieldDefinitions) {
+      return;
+    }
+
+    await navigator.clipboard.writeText(
+      JSON.stringify(selectedSchemaDetails.fieldDefinitions, null, 2)
+    );
+    onNotify({ title: "Copied", message: "Field definitions copied" });
+  };
+
   return (
-    <section className="grid gap-6 xl:grid-cols-[1.1fr,1fr]">
-      <article className="glass-card p-6">
-        <div className="mb-4 flex items-center justify-between gap-3">
-          <h2 className="text-xl font-semibold text-white">Schema Manager</h2>
-          <button className="secondary-btn" type="button" onClick={loadSchemas} disabled={loading}>
-            <RefreshCcw className={`h-4 w-4 ${loading ? "animate-spin" : ""}`} /> Refresh
-          </button>
-        </div>
+    <section className="space-y-6">
+      <article className="glass-card p-5">
+        <div className="grid gap-5 xl:grid-cols-[1.05fr,1fr]">
+          <div className="rounded-xl border border-slate-700 bg-slate-900/40 p-4">
+            <div className="mb-3 flex items-center justify-between gap-2">
+              <h4 className="text-base font-semibold text-white">Schema Catalog</h4>
+              <button className="secondary-btn" type="button" onClick={openCreateModal}>
+                <PlusCircle className="h-4 w-4" /> New
+              </button>
+            </div>
 
-        {activeSchema ? (
-          <div className="mb-5 rounded-xl border border-green-500/40 bg-green-500/10 p-4">
-            <p className="text-xs font-semibold uppercase tracking-wider text-green-300">
-              Active Schema
-            </p>
-            <p className="mt-1 text-lg font-semibold text-white">{activeSchema.formName}</p>
-            <p className="text-sm text-green-200">Version {activeSchema.formVersionId}</p>
-          </div>
-        ) : (
-          <div className="mb-5 rounded-xl border border-yellow-500/40 bg-yellow-500/10 p-4 text-sm text-yellow-200">
-            No active schema found.
-          </div>
-        )}
-
-        <div className="space-y-4 rounded-xl border border-slate-700 bg-slate-900/40 p-4">
-          <h3 className="text-sm font-semibold uppercase tracking-wide text-slate-200">
-            Create New Schema
-          </h3>
-
-          <div className="grid gap-4 md:grid-cols-2">
-            <label className="block">
-              <span className="mb-1 block text-xs text-slate-300">Form Version ID</span>
-              <input
-                className="form-input"
-                placeholder="v1.0.0"
-                value={formData.formVersionId}
-                onChange={(event) =>
-                  setFormData((prev) => ({ ...prev, formVersionId: event.target.value }))
-                }
-              />
-            </label>
-            <label className="block">
-              <span className="mb-1 block text-xs text-slate-300">Form Name</span>
-              <input
-                className="form-input"
-                placeholder="Order Entry Form"
-                value={formData.formName}
-                onChange={(event) =>
-                  setFormData((prev) => ({ ...prev, formName: event.target.value }))
-                }
-              />
-            </label>
-          </div>
-
-          <label className="block">
-            <span className="mb-1 block text-xs text-slate-300">Description</span>
-            <input
-              className="form-input"
-              placeholder="Initial order form schema"
-              value={formData.description}
-              onChange={(event) =>
-                setFormData((prev) => ({ ...prev, description: event.target.value }))
-              }
-            />
-          </label>
-
-          <label className="block">
-            <span className="mb-1 block text-xs text-slate-300">Field Definitions (JSON)</span>
-            <textarea
-              className="form-input min-h-56 font-mono text-xs"
-              value={formData.fieldDefinitionsText}
-              onChange={(event) =>
-                setFormData((prev) => ({ ...prev, fieldDefinitionsText: event.target.value }))
-              }
-            />
-          </label>
-
-          <button
-            className="primary-btn"
-            type="button"
-            disabled={submitting}
-            onClick={handleCreateSchema}
-          >
-            {submitting ? (
-              <Loader2 className="h-4 w-4 animate-spin" />
+            {loading ? (
+              <div className="flex items-center gap-2 text-sm text-slate-300">
+                <Loader2 className="h-4 w-4 animate-spin" /> Loading schemas...
+              </div>
+            ) : orderedSchemas.length === 0 ? (
+              <p className="text-sm text-slate-300">No schemas returned from API.</p>
             ) : (
-              <PlusCircle className="h-4 w-4" />
-            )}
-            Create Schema
-          </button>
-        </div>
+              <ul className="space-y-3">
+                {orderedSchemas.map((schema) => {
+                  const isActive = Boolean(schema.isActive);
+                  const isBusy = activatingId === schema.formVersionId;
+                  const isDeprecating = deprecatingId === schema.formVersionId;
+                  const isSelected = selectedSchemaVersionId === schema.formVersionId;
 
-        {error ? (
-          <div className="mt-4 rounded-lg border border-red-500/50 bg-red-500/20 px-3 py-2 text-sm text-red-200">
-            {error}
+                  return (
+                    <li
+                      key={schema.id || schema.formVersionId}
+                      className={`rounded-xl border p-3 transition ${
+                        isSelected
+                          ? "border-blue-400/50 bg-blue-500/10"
+                          : isActive
+                            ? "border-green-500/40 bg-green-500/10"
+                            : "border-slate-700 bg-slate-900/50"
+                      }`}
+                    >
+                      <div className="flex items-start justify-between gap-3">
+                        <div>
+                          <p className="font-semibold text-white">{schema.formName}</p>
+                          <p className="text-sm text-slate-300">{schema.formVersionId}</p>
+                          {schema.description ? (
+                            <p className="mt-1 text-xs text-slate-400">{schema.description}</p>
+                          ) : null}
+                        </div>
+                        {isActive ? (
+                          <span className="inline-flex items-center gap-1 rounded-full border border-green-500/40 bg-green-500/20 px-2.5 py-1 text-xs font-semibold text-green-200">
+                            <CheckCircle2 className="h-3.5 w-3.5" /> Active
+                          </span>
+                        ) : null}
+                      </div>
+
+                      <div className="mt-3 flex flex-wrap gap-2">
+                        <button
+                          className="secondary-btn"
+                          type="button"
+                          onClick={() => loadSchemaDetails(schema.formVersionId)}
+                        >
+                          <Eye className="h-4 w-4" /> View
+                        </button>
+
+                        {!isActive ? (
+                          <button
+                            className="secondary-btn"
+                            type="button"
+                            onClick={() => handleActivate(schema.formVersionId)}
+                            disabled={isBusy || isDeprecating}
+                          >
+                            {isBusy ? <Loader2 className="h-4 w-4 animate-spin" /> : null}
+                            Activate
+                          </button>
+                        ) : null}
+
+                        {!isActive ? (
+                          <button
+                            className="secondary-btn border-red-500/50 bg-red-600/20 text-red-100 hover:bg-red-600/30"
+                            type="button"
+                            onClick={() => handleDeprecate(schema)}
+                            disabled={isBusy || isDeprecating}
+                          >
+                            {isDeprecating ? (
+                              <Loader2 className="h-4 w-4 animate-spin" />
+                            ) : (
+                              <Trash2 className="h-4 w-4" />
+                            )}
+                            Deprecate
+                          </button>
+                        ) : null}
+                      </div>
+                    </li>
+                  );
+                })}
+              </ul>
+            )}
           </div>
-        ) : null}
+
+          <div className="rounded-xl border border-slate-700 bg-slate-900/40 p-4">
+            <h4 className="mb-3 text-base font-semibold text-white">Schema Inspector</h4>
+
+            {loadingSelectedDetails ? (
+              <div className="flex items-center gap-2 text-sm text-slate-300">
+                <Loader2 className="h-4 w-4 animate-spin" /> Loading schema details...
+              </div>
+            ) : selectedSchemaDetails ? (
+              <div className="space-y-4">
+                <div className="rounded-xl border border-slate-700 bg-slate-900/50 p-4">
+                  <div className="flex flex-wrap items-start justify-between gap-3">
+                    <div>
+                      <p className="text-lg font-semibold text-white">{selectedSchemaDetails.formName}</p>
+                      <p className="text-sm text-slate-300">{selectedSchemaDetails.formVersionId}</p>
+                    </div>
+                  </div>
+
+                  <div className="mt-4 grid gap-2 text-xs text-slate-300 sm:grid-cols-2">
+                    <p className="inline-flex items-center gap-1">
+                      <CalendarClock className="h-3.5 w-3.5" /> Created: {formatDateTime(selectedSchemaDetails.createdDate)}
+                    </p>
+                    <p className="inline-flex items-center gap-1">
+                      <User2 className="h-3.5 w-3.5" /> Author: {selectedSchemaDetails.createdBy || "-"}
+                    </p>
+                    <p className="inline-flex items-center gap-1">
+                      <Info className="h-3.5 w-3.5" /> Fields: {selectedFieldCount}
+                    </p>
+                    <p className="inline-flex items-center gap-1">
+                      <Info className="h-3.5 w-3.5" /> Deprecated: {formatDateTime(selectedSchemaDetails.deprecatedDate)}
+                    </p>
+                  </div>
+
+                  {selectedSchemaDetails.description ? (
+                    <p className="mt-3 rounded-lg border border-slate-700 bg-slate-950/50 p-3 text-xs text-slate-300">
+                      {selectedSchemaDetails.description}
+                    </p>
+                  ) : null}
+                </div>
+
+                <div className="rounded-xl border border-slate-700 bg-slate-900/50">
+                  <div className="flex items-center justify-between border-b border-slate-700 px-4 py-3">
+                    <p className="inline-flex items-center gap-2 text-sm font-semibold text-white">
+                      <FileJson className="h-4 w-4 text-blue-300" /> Field Definitions JSON
+                    </p>
+                    <button className="secondary-btn" type="button" onClick={copySchemaJson}>
+                      <Copy className="h-4 w-4" /> Copy
+                    </button>
+                  </div>
+                  <pre className="max-h-[28rem] overflow-auto bg-slate-950/70 p-4 text-xs text-slate-200">
+                    {JSON.stringify(selectedSchemaDetails.fieldDefinitions || {}, null, 2)}
+                  </pre>
+                </div>
+              </div>
+            ) : (
+              <p className="text-sm text-slate-300">Select a schema from catalog to inspect full details.</p>
+            )}
+          </div>
+        </div>
       </article>
 
-      <aside className="glass-card p-5">
-        <h3 className="mb-3 text-lg font-semibold text-white">Available Schemas</h3>
-
-        {loading ? (
-          <div className="flex items-center gap-2 text-sm text-slate-300">
-            <Loader2 className="h-4 w-4 animate-spin" /> Loading schemas...
-          </div>
-        ) : sortedSchemas.length === 0 ? (
-          <p className="text-sm text-slate-300">No schemas returned from API.</p>
-        ) : (
-          <ul className="space-y-3">
-            {sortedSchemas.map((schema) => {
-              const isActive = Boolean(schema.isActive);
-              const isBusy = activatingId === schema.formVersionId;
-              const isDeprecating = deprecatingId === schema.formVersionId;
-              const isSelected = selectedSchemaVersionId === schema.formVersionId;
-
-              return (
-                <li
-                  key={schema.id || schema.formVersionId}
-                  className={`rounded-xl border p-3 ${
-                    isSelected
-                      ? "border-blue-400/50 bg-blue-500/10"
-                      : isActive
-                        ? "border-green-500/40 bg-green-500/10"
-                        : "border-slate-700 bg-slate-900/50"
-                  }`}
-                >
-                  <div className="flex items-start justify-between gap-3">
-                    <div>
-                      <p className="font-semibold text-white">{schema.formName}</p>
-                      <p className="text-sm text-slate-300">{schema.formVersionId}</p>
-                      {schema.description ? (
-                        <p className="mt-1 text-xs text-slate-400">{schema.description}</p>
-                      ) : null}
-                    </div>
-                    {isActive ? (
-                      <span className="inline-flex items-center gap-1 rounded-full border border-green-500/40 bg-green-500/20 px-2.5 py-1 text-xs font-semibold text-green-200">
-                        <CheckCircle2 className="h-3.5 w-3.5" /> Active
-                      </span>
-                    ) : null}
-                  </div>
-
-                  <div className="mt-3 flex flex-wrap gap-2">
-                    <button
-                      className="secondary-btn"
-                      type="button"
-                      onClick={() => loadSchemaDetails(schema.formVersionId)}
-                    >
-                      <Eye className="h-4 w-4" /> View
-                    </button>
-
-                    {!isActive ? (
-                      <button
-                        className="secondary-btn"
-                        type="button"
-                        onClick={() => handleActivate(schema.formVersionId)}
-                        disabled={isBusy || isDeprecating}
-                      >
-                        {isBusy ? <Loader2 className="h-4 w-4 animate-spin" /> : null}
-                        Activate
-                      </button>
-                    ) : null}
-
-                    {!isActive ? (
-                      <button
-                        className="secondary-btn border-red-500/50 bg-red-600/20 text-red-100 hover:bg-red-600/30"
-                        type="button"
-                        onClick={() => handleDeprecate(schema)}
-                        disabled={isBusy || isDeprecating}
-                      >
-                        {isDeprecating ? (
-                          <Loader2 className="h-4 w-4 animate-spin" />
-                        ) : (
-                          <Trash2 className="h-4 w-4" />
-                        )}
-                        Deprecate
-                      </button>
-                    ) : null}
-                  </div>
-                </li>
-              );
-            })}
-          </ul>
-        )}
-
-        <div className="mt-5 rounded-xl border border-slate-700 bg-slate-900/50 p-4">
-          <p className="mb-2 text-sm font-semibold text-white">Selected Schema Details</p>
-
-          {loadingSelectedDetails ? (
-            <p className="inline-flex items-center gap-2 text-sm text-slate-300">
-              <Loader2 className="h-4 w-4 animate-spin" /> Loading schema detail...
-            </p>
-          ) : selectedSchemaDetails ? (
-            <div className="space-y-3 text-sm">
-              <p>
-                <span className="text-slate-400">Version:</span> {selectedSchemaDetails.formVersionId}
-              </p>
-              <p>
-                <span className="text-slate-400">Name:</span> {selectedSchemaDetails.formName}
-              </p>
-              <p>
-                <span className="text-slate-400">Created By:</span> {selectedSchemaDetails.createdBy || "-"}
-              </p>
-              <p>
-                <span className="text-slate-400">Created:</span> {selectedSchemaDetails.createdDate || "-"}
-              </p>
-              <p className="inline-flex items-center gap-1 text-xs font-semibold uppercase tracking-wide text-slate-300">
-                <FileJson className="h-3.5 w-3.5" /> Field Definitions
-              </p>
-              <pre className="max-h-64 overflow-auto rounded-lg border border-slate-700 bg-slate-950/70 p-3 text-xs text-slate-200">
-                {JSON.stringify(selectedSchemaDetails.fieldDefinitions || {}, null, 2)}
-              </pre>
-            </div>
-          ) : (
-            <p className="text-sm text-slate-300">Select a schema to inspect details.</p>
-          )}
+      {error ? (
+        <div className="rounded-lg border border-red-500/50 bg-red-500/20 px-3 py-2 text-sm text-red-200">
+          {error}
         </div>
-      </aside>
+      ) : null}
+
+      {isCreateModalOpen ? (
+        <div
+          className="fixed inset-0 z-50 flex items-center justify-center bg-slate-950/80 p-4 backdrop-blur-sm"
+          onMouseDown={(event) => {
+            if (event.target === event.currentTarget && !submitting) {
+              setIsCreateModalOpen(false);
+            }
+          }}
+        >
+          <div className="glass-card max-h-[90vh] w-full max-w-3xl overflow-auto p-6">
+            <div className="mb-4 flex items-center justify-between gap-3">
+              <h4 className="text-lg font-semibold text-white">Create New Schema</h4>
+              <button
+                className="secondary-btn"
+                type="button"
+                disabled={submitting}
+                onClick={() => setIsCreateModalOpen(false)}
+              >
+                <X className="h-4 w-4" /> Close
+              </button>
+            </div>
+
+            <div className="space-y-4 rounded-xl border border-slate-700 bg-slate-900/40 p-4">
+              <div className="grid gap-4 md:grid-cols-2">
+                <label className="block">
+                  <span className="mb-1 block text-xs text-slate-300">Form Version ID</span>
+                  <input
+                    className="form-input"
+                    placeholder="v1.0.0"
+                    value={formData.formVersionId}
+                    onChange={(event) =>
+                      setFormData((prev) => ({ ...prev, formVersionId: event.target.value }))
+                    }
+                  />
+                </label>
+                <label className="block">
+                  <span className="mb-1 block text-xs text-slate-300">Form Name</span>
+                  <input
+                    className="form-input"
+                    placeholder="Order Entry Form"
+                    value={formData.formName}
+                    onChange={(event) =>
+                      setFormData((prev) => ({ ...prev, formName: event.target.value }))
+                    }
+                  />
+                </label>
+              </div>
+
+              <label className="block">
+                <span className="mb-1 block text-xs text-slate-300">Description</span>
+                <input
+                  className="form-input"
+                  placeholder="Initial order form schema"
+                  value={formData.description}
+                  onChange={(event) =>
+                    setFormData((prev) => ({ ...prev, description: event.target.value }))
+                  }
+                />
+              </label>
+
+              <label className="block">
+                <span className="mb-1 block text-xs text-slate-300">Field Definitions (JSON)</span>
+                <textarea
+                  className="form-input min-h-72 font-mono text-xs"
+                  value={formData.fieldDefinitionsText}
+                  onChange={(event) =>
+                    setFormData((prev) => ({ ...prev, fieldDefinitionsText: event.target.value }))
+                  }
+                />
+              </label>
+
+              <button
+                className="primary-btn"
+                type="button"
+                disabled={submitting}
+                onClick={handleCreateSchema}
+              >
+                {submitting ? (
+                  <Loader2 className="h-4 w-4 animate-spin" />
+                ) : (
+                  <PlusCircle className="h-4 w-4" />
+                )}
+                Create Schema
+              </button>
+            </div>
+          </div>
+        </div>
+      ) : null}
     </section>
   );
 }

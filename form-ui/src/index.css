@@ -8,9 +8,14 @@
   color-scheme: dark;
 }
 
+html {
+  scrollbar-gutter: stable;
+}
+
 body {
   margin: 0;
   min-height: 100vh;
+  overflow-y: scroll;
   background: radial-gradient(circle at top right, rgba(30, 64, 175, 0.25), transparent 40%),
     linear-gradient(to bottom right, #111827, #1e3a8a, #111827);
   color: #f8fafc;
