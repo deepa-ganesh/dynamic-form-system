@@ -5,11 +5,12 @@ import {
   Clock3,
   Copy,
   Database,
+  Edit3,
   Loader2,
   RefreshCcw,
   Search
 } from "lucide-react";
-import { useSearchParams } from "react-router-dom";
+import { useNavigate, useSearchParams } from "react-router-dom";
 import {
   getCommittedVersions,
   getLatestVersion,
@@ -80,6 +81,7 @@ function getValueByPath(source, path) {
 }
 
 export default function VersionHistory({ onNotify }) {
+  const navigate = useNavigate();
   const [searchParams, setSearchParams] = useSearchParams();
   const requestedOrderIdParam = searchParams.get("orderId");
   const [orderId, setOrderId] = useState("");
@@ -314,6 +316,21 @@ export default function VersionHistory({ onNotify }) {
     } finally {
       setPromoting(false);
     }
+  };
+
+  const handleResumeDraft = () => {
+    if (!historyData?.orderId || !selectedVersionSummary?.orderVersionNumber) {
+      return;
+    }
+    if (selectedVersionSummary.orderStatus !== "WIP") {
+      return;
+    }
+
+    navigate(
+      `/orders?resumeOrderId=${encodeURIComponent(historyData.orderId)}&resumeVersion=${encodeURIComponent(
+        selectedVersionSummary.orderVersionNumber
+      )}`
+    );
   };
 
   useEffect(() => {
@@ -640,19 +657,30 @@ export default function VersionHistory({ onNotify }) {
             </div>
 
             {selectedVersionSummary.orderStatus === "WIP" ? (
-              <button
-                className="primary-btn w-full justify-center"
-                type="button"
-                disabled={promoting || loading}
-                onClick={handlePromote}
-              >
-                {promoting ? (
-                  <Loader2 className="h-4 w-4 animate-spin" />
-                ) : (
-                  <ArrowUpCircle className="h-4 w-4" />
-                )}
-                Promote This WIP Version
-              </button>
+              <div className="grid gap-2 sm:grid-cols-2">
+                <button
+                  className="secondary-btn w-full justify-center"
+                  type="button"
+                  disabled={loading}
+                  onClick={handleResumeDraft}
+                >
+                  <Edit3 className="h-4 w-4" />
+                  Resume This Draft
+                </button>
+                <button
+                  className="primary-btn w-full justify-center"
+                  type="button"
+                  disabled={promoting || loading}
+                  onClick={handlePromote}
+                >
+                  {promoting ? (
+                    <Loader2 className="h-4 w-4 animate-spin" />
+                  ) : (
+                    <ArrowUpCircle className="h-4 w-4" />
+                  )}
+                  Promote This WIP Version
+                </button>
+              </div>
             ) : null}
 
             <div className="rounded-lg border border-slate-700 bg-slate-900/50 p-3">

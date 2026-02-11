@@ -7,6 +7,7 @@ import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.stereotype.Service;
 
+import java.util.List;
 import java.util.Map;
 
 /**
@@ -37,24 +38,111 @@ public class ValidationService {
             return;
         }
 
-        // Iterate through field definitions and validate
-        for (JsonNode fieldDef : fields) {
-            String fieldName = fieldDef.get("fieldName").asText();
-            boolean required = fieldDef.has("required") && fieldDef.get("required").asBoolean();
-
-            // Check required fields
-            if (required && !data.containsKey(fieldName)) {
-                throw new ValidationException(fieldName, "Field is required but missing");
-            }
-
-            // Validate field value if present
-            if (data.containsKey(fieldName)) {
-                Object value = data.get(fieldName);
-                validateFieldValue(fieldName, value, fieldDef);
-            }
-        }
+        validateFields(data, fields, "");
 
         log.debug("Validation successful for schema: {}", schema.getFormVersionId());
+    }
+
+    /**
+     * Recursively validate fields in current context map.
+     *
+     * @param contextData current object scope (root/subform/table row)
+     * @param fields field definitions for this scope
+     * @param pathPrefix path prefix for error messages
+     */
+    private void validateFields(Map<String, Object> contextData, JsonNode fields, String pathPrefix) {
+        for (JsonNode fieldDef : fields) {
+            String fieldName = fieldDef.get("fieldName").asText();
+            String fieldType = fieldDef.get("fieldType").asText("");
+            String fieldPath = pathPrefix.isEmpty() ? fieldName : pathPrefix + "." + fieldName;
+            boolean required = fieldDef.has("required") && fieldDef.get("required").asBoolean();
+
+            Object value = contextData.get(fieldName);
+
+            if (required && isEmptyValue(value, fieldType)) {
+                throw new ValidationException(fieldPath, "Field is required but missing");
+            }
+
+            if (!isEmptyValue(value, fieldType)) {
+                validateFieldValue(fieldPath, value, fieldDef);
+            }
+
+            switch (fieldType) {
+                case "subform":
+                    validateSubform(fieldPath, value, fieldDef);
+                    break;
+                case "table":
+                    validateTable(fieldPath, value, fieldDef);
+                    break;
+                default:
+                    // no-op for simple fields
+            }
+        }
+    }
+
+    /**
+     * Validate nested subform fields.
+     */
+    @SuppressWarnings("unchecked")
+    private void validateSubform(String fieldPath, Object value, JsonNode fieldDef) {
+        JsonNode subFields = fieldDef.get("subFields");
+        if (subFields == null || !subFields.isArray() || value == null) {
+            return;
+        }
+
+        if (!(value instanceof Map)) {
+            throw new ValidationException(fieldPath, "Expected object value for subform");
+        }
+
+        validateFields((Map<String, Object>) value, subFields, fieldPath);
+    }
+
+    /**
+     * Validate nested table rows and their column definitions.
+     */
+    @SuppressWarnings("unchecked")
+    private void validateTable(String fieldPath, Object value, JsonNode fieldDef) {
+        JsonNode columns = fieldDef.get("columns");
+        if (columns == null || !columns.isArray() || value == null) {
+            return;
+        }
+
+        if (!(value instanceof List)) {
+            throw new ValidationException(fieldPath, "Expected array value for table");
+        }
+
+        List<?> rows = (List<?>) value;
+        for (int i = 0; i < rows.size(); i++) {
+            Object row = rows.get(i);
+            String rowPath = fieldPath + "[" + i + "]";
+
+            if (!(row instanceof Map)) {
+                throw new ValidationException(rowPath, "Expected object row in table");
+            }
+
+            validateFields((Map<String, Object>) row, columns, rowPath);
+        }
+    }
+
+    /**
+     * Check whether value should be treated as empty for required checks.
+     */
+    private boolean isEmptyValue(Object value, String fieldType) {
+        if (value == null) {
+            return true;
+        }
+
+        switch (fieldType) {
+            case "multivalue":
+            case "table":
+                return !(value instanceof List) || ((List<?>) value).isEmpty();
+            case "subform":
+                return !(value instanceof Map) || ((Map<?, ?>) value).isEmpty();
+            case "checkbox":
+                return false;
+            default:
+                return String.valueOf(value).trim().isEmpty();
+        }
     }
 
     /**

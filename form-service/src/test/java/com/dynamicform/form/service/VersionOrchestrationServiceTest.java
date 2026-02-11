@@ -55,6 +55,9 @@ class VersionOrchestrationServiceTest {
     @Mock
     private FormSchemaRepository formSchemaRepository;
 
+    @Mock
+    private ValidationService validationService;
+
     @InjectMocks
     private VersionOrchestrationService versionOrchestrationService;
 

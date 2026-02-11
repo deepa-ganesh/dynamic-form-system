@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useState } from "react";
 import {
   ChevronDown,
   ChevronRight,
@@ -11,9 +11,12 @@ import {
   Trash2,
   Wand2
 } from "lucide-react";
+import { useSearchParams } from "react-router-dom";
 import {
   createOrder,
   getActiveSchema,
+  getSpecificVersion,
+  getVersionHistory,
   getPrefillMappings,
   prefillFromDimensional
 } from "../services/api";
@@ -224,30 +227,203 @@ function getSchemaFields(schema) {
   return Array.isArray(fields) ? fields : [];
 }
 
-function collectMissingRequiredFields(fields, values, basePath = "") {
-  const missing = [];
+function collectFieldValidationErrors(fields, values, basePath = "") {
+  const errors = [];
 
   (Array.isArray(fields) ? fields : []).forEach((field) => {
     if (!field?.fieldName) {
       return;
     }
 
+    const type = normalizeFieldType(field.fieldType);
+    const label = field.label || field.fieldName;
     const path = joinPath(basePath, field.fieldName);
     const value = getByPath(values, path);
-    const label = field.label || field.fieldName;
+    const hasValue = !isEmptyByType(value, field.fieldType);
+    const validation = field?.validation && typeof field.validation === "object" ? field.validation : {};
+    const hasValidationRules = Object.keys(validation).length > 0;
 
-    if (field.required && isEmptyByType(value, field.fieldType)) {
-      missing.push(label);
+    if (field.required && !hasValue) {
+      errors.push({
+        path,
+        message: `${label} is required`,
+        inline: hasValidationRules
+      });
     }
 
-    const type = normalizeFieldType(field.fieldType);
     if (type === "subform") {
+      if (hasValue && (!value || typeof value !== "object" || Array.isArray(value))) {
+        errors.push({
+          path,
+          message: `${label} must be a valid object`,
+          inline: false
+        });
+        return;
+      }
+
       const subFields = Array.isArray(field.subFields) ? field.subFields : [];
-      missing.push(...collectMissingRequiredFields(subFields, values, path));
+      errors.push(...collectFieldValidationErrors(subFields, values, path));
+      return;
+    }
+
+    if (type === "table") {
+      if (hasValue && !Array.isArray(value)) {
+        errors.push({
+          path,
+          message: `${label} must be an array of rows`,
+          inline: false
+        });
+        return;
+      }
+
+      const rows = Array.isArray(value) ? value : [];
+      if (hasValidationRules && field.minRows != null && rows.length < Number(field.minRows)) {
+        errors.push({
+          path,
+          message: `${label} must have at least ${field.minRows} row(s)`,
+          inline: hasValidationRules
+        });
+      }
+      if (hasValidationRules && field.maxRows != null && rows.length > Number(field.maxRows)) {
+        errors.push({
+          path,
+          message: `${label} cannot have more than ${field.maxRows} row(s)`,
+          inline: hasValidationRules
+        });
+      }
+
+      const columns = Array.isArray(field.columns) ? field.columns : [];
+      rows.forEach((row, rowIndex) => {
+        const rowPath = joinPath(path, String(rowIndex));
+        if (row == null || typeof row !== "object" || Array.isArray(row)) {
+          errors.push({
+            path: rowPath,
+            message: `${label} row ${rowIndex + 1} must be a valid object`,
+            inline: false
+          });
+          return;
+        }
+
+        errors.push(...collectFieldValidationErrors(columns, values, rowPath));
+      });
+      return;
+    }
+
+    if (type === "multivalue") {
+      if (hasValue && !Array.isArray(value)) {
+        errors.push({
+          path,
+          message: `${label} must be an array`,
+          inline: false
+        });
+        return;
+      }
+
+      const listValue = Array.isArray(value) ? value : [];
+      if (hasValidationRules && field.minValues != null && listValue.length < Number(field.minValues)) {
+        errors.push({
+          path,
+          message: `${label} must contain at least ${field.minValues} value(s)`,
+          inline: hasValidationRules
+        });
+      }
+      if (hasValidationRules && field.maxValues != null && listValue.length > Number(field.maxValues)) {
+        errors.push({
+          path,
+          message: `${label} cannot contain more than ${field.maxValues} value(s)`,
+          inline: hasValidationRules
+        });
+      }
+      return;
+    }
+
+    if (!hasValue) {
+      return;
+    }
+
+    if (!hasValidationRules) {
+      return;
+    }
+
+    if (type === "number") {
+      const numValue = Number(value);
+      if (Number.isNaN(numValue)) {
+        errors.push({ path, message: `${label} must be a valid number`, inline: true });
+        return;
+      }
+      if (validation.min != null && numValue < Number(validation.min)) {
+        errors.push({
+          path,
+          message: `${label} must be greater than or equal to ${validation.min}`,
+          inline: true
+        });
+      }
+      if (validation.max != null && numValue > Number(validation.max)) {
+        errors.push({
+          path,
+          message: `${label} must be less than or equal to ${validation.max}`,
+          inline: true
+        });
+      }
+      return;
+    }
+
+    if (type === "date") {
+      const dateValue = String(value);
+      const isIsoDate = /^\d{4}-\d{2}-\d{2}$/.test(dateValue);
+      if (!isIsoDate || Number.isNaN(new Date(dateValue).getTime())) {
+        errors.push({
+          path,
+          message: `${label} must be a valid date in yyyy-MM-dd format`,
+          inline: true
+        });
+      }
+      return;
+    }
+
+    const textValue = String(value);
+    if (validation.minLength != null && textValue.length < Number(validation.minLength)) {
+      errors.push({
+        path,
+        message: `${label} must be at least ${validation.minLength} characters`,
+        inline: true
+      });
+    }
+    if (validation.maxLength != null && textValue.length > Number(validation.maxLength)) {
+      errors.push({
+        path,
+        message: `${label} cannot exceed ${validation.maxLength} characters`,
+        inline: true
+      });
+    }
+    if (validation.pattern) {
+      try {
+        const regex = new RegExp(validation.pattern);
+        if (!regex.test(textValue)) {
+          errors.push({
+            path,
+            message: `${label} does not match required format`,
+            inline: true
+          });
+        }
+      } catch {
+        // Ignore malformed schema regex pattern in UI validator.
+      }
+    }
+
+    if (type === "dropdown" && Array.isArray(field.options) && field.options.length > 0) {
+      const allowedValues = field.options.map((option) => getOptionValue(option));
+      if (!allowedValues.includes(textValue)) {
+        errors.push({
+          path,
+          message: `${label} must be one of the configured options`,
+          inline: true
+        });
+      }
     }
   });
 
-  return missing;
+  return errors;
 }
 
 function parseDeliveryLocations(value) {
@@ -296,6 +472,7 @@ function formatDateTime(value) {
 }
 
 export default function OrderForm({ onNotify }) {
+  const [searchParams, setSearchParams] = useSearchParams();
   const [activeSchema, setActiveSchema] = useState(null);
   const [schemaLoading, setSchemaLoading] = useState(false);
 
@@ -322,6 +499,8 @@ export default function OrderForm({ onNotify }) {
   const [lastSavedAt, setLastSavedAt] = useState("");
   const [lastDraftFingerprint, setLastDraftFingerprint] = useState("");
   const [hasInteracted, setHasInteracted] = useState(false);
+  const [showValidation, setShowValidation] = useState(false);
+  const [resumeLoading, setResumeLoading] = useState(false);
   const [error, setError] = useState("");
 
   const schemaFields = useMemo(() => getSchemaFields(activeSchema), [activeSchema]);
@@ -334,10 +513,25 @@ export default function OrderForm({ onNotify }) {
     };
   }, [schemaFields]);
 
-  const missingRequiredFields = useMemo(
-    () => collectMissingRequiredFields(schemaFields, formValues),
-    [schemaFields, formValues]
-  );
+  const validationIssues = useMemo(() => {
+    if (!showValidation) {
+      return [];
+    }
+    return collectFieldValidationErrors(schemaFields, formValues);
+  }, [showValidation, schemaFields, formValues]);
+
+  const fieldErrorMap = useMemo(() => {
+    return validationIssues.filter((issue) => issue.inline).reduce((acc, issue) => {
+      if (!issue?.path || !issue?.message) {
+        return acc;
+      }
+      if (!acc[issue.path]) {
+        acc[issue.path] = [];
+      }
+      acc[issue.path].push(issue.message);
+      return acc;
+    }, {});
+  }, [validationIssues]);
 
   const draftPayload = useMemo(
     () => buildOrderPayload(formValues, changeDescription, false),
@@ -346,17 +540,88 @@ export default function OrderForm({ onNotify }) {
 
   const draftFingerprint = useMemo(() => fingerprintDraftPayload(draftPayload), [draftPayload]);
 
-  const canSubmit = useMemo(() => {
+  const hasMinimumSubmitData = useMemo(() => {
     const isOrderIdValid = /^ORD-[0-9]{5}$/.test(draftPayload.orderId || "");
     const hasLocations = Array.isArray(draftPayload.deliveryLocations) && draftPayload.deliveryLocations.length > 0;
-    return isOrderIdValid && hasLocations && missingRequiredFields.length === 0;
-  }, [draftPayload.deliveryLocations, draftPayload.orderId, missingRequiredFields.length]);
+    return isOrderIdValid && hasLocations;
+  }, [draftPayload.deliveryLocations, draftPayload.orderId]);
+
+  const canSubmit = useMemo(() => {
+    return loadingAction.length === 0 && !prefillLoading && !schemaLoading;
+  }, [loadingAction.length, prefillLoading, schemaLoading]);
+
+  const isDraftDirty = useMemo(
+    () => hasInteracted && draftFingerprint !== lastDraftFingerprint,
+    [hasInteracted, draftFingerprint, lastDraftFingerprint]
+  );
+
+  const autoSaveUi = useMemo(() => {
+    if (!autoSaveEnabled) {
+      return {
+        label: "Auto-save off",
+        dotClass: "bg-slate-500",
+        textClass: "text-slate-300"
+      };
+    }
+
+    if (isDraftDirty) {
+      return {
+        label: "Draft changes pending",
+        dotClass: "bg-amber-400",
+        textClass: "text-amber-200"
+      };
+    }
+
+    if (autoSaveState === "saving") {
+      return {
+        label: "Auto-saving",
+        dotClass: "bg-blue-400",
+        textClass: "text-blue-200"
+      };
+    }
+
+    if (autoSaveState === "saved") {
+      return {
+        label: "Auto-saved",
+        dotClass: "bg-green-400",
+        textClass: "text-green-200"
+      };
+    }
+
+    if (autoSaveState === "error") {
+      return {
+        label: "Auto-save failed",
+        dotClass: "bg-red-400",
+        textClass: "text-red-200"
+      };
+    }
+
+    return {
+      label: "Draft synced",
+      dotClass: "bg-slate-400",
+      textClass: "text-slate-200"
+    };
+  }, [autoSaveEnabled, autoSaveState, isDraftDirty]);
 
   const selectedTableMapping = useMemo(() => {
     return (
       prefillMappings.tables.find((table) => table.sourceTable === prefillConfig.sourceTable) || null
     );
   }, [prefillMappings.tables, prefillConfig.sourceTable]);
+
+  const resumeOrderIdParam = useMemo(
+    () => String(searchParams.get("resumeOrderId") || "").trim().toUpperCase(),
+    [searchParams]
+  );
+
+  const resumeVersionParam = useMemo(() => {
+    const raw = String(searchParams.get("resumeVersion") || "").trim();
+    if (!raw) {
+      return null;
+    }
+    const parsed = Number(raw);
+    return Number.isInteger(parsed) && parsed > 0 ? parsed : null;
+  }, [searchParams]);
 
   const updatePathValue = (path, value) => {
     setHasInteracted(true);
@@ -367,6 +632,93 @@ export default function OrderForm({ onNotify }) {
     setLastDraftFingerprint(fingerprint);
     setLastSavedAt(new Date().toISOString());
   };
+
+  const clearResumeParams = useCallback(() => {
+    const next = new URLSearchParams(searchParams);
+    next.delete("resumeOrderId");
+    next.delete("resumeVersion");
+    setSearchParams(next, { replace: true });
+  }, [searchParams, setSearchParams]);
+
+  const applyResumedVersionToForm = useCallback(
+    (detail) => {
+      const schemaDefaults = buildDefaultFormValues(schemaFields);
+      const detailData = detail?.data && typeof detail.data === "object" ? detail.data : {};
+      let nextFormValues = deepMerge(schemaDefaults, detailData);
+      nextFormValues = setByPath(nextFormValues, "orderId", detail.orderId || "");
+
+      const deliveryLocationsValue = getByPath(nextFormValues, "deliveryLocations");
+      if (!Array.isArray(deliveryLocationsValue) && typeof deliveryLocationsValue !== "string") {
+        nextFormValues = setByPath(nextFormValues, "deliveryLocations", []);
+      }
+
+      setFormValues(nextFormValues);
+      setChangeDescription(detail.changeDescription || "");
+      setShowValidation(false);
+      setError("");
+      setHasInteracted(false);
+
+      const persistedFingerprint = fingerprintDraftPayload(
+        buildOrderPayload(nextFormValues, detail.changeDescription || "", false)
+      );
+      markDraftSaved(persistedFingerprint);
+      setAutoSaveState("idle");
+    },
+    [schemaFields]
+  );
+
+  const saveDraftSnapshot = useCallback(
+    async (reason = "auto") => {
+      if (!autoSaveEnabled || loadingAction || prefillLoading || schemaLoading || !isDraftDirty) {
+        return;
+      }
+
+      setAutoSaveState("saving");
+      setError("");
+
+      try {
+        const payload = {
+          ...draftPayload,
+          finalSave: false,
+          changeDescription: draftPayload.changeDescription || "Draft snapshot"
+        };
+
+        const response = await createOrder(payload);
+
+        const persistedFingerprint = fingerprintDraftPayload({
+          ...payload,
+          orderId: response.orderId
+        });
+        markDraftSaved(persistedFingerprint);
+        setAutoSaveState("saved");
+
+        const currentOrderId = String(getByPath(formValues, "orderId") || "").trim().toUpperCase();
+        if (!/^ORD-[0-9]{5}$/.test(currentOrderId) || currentOrderId !== response.orderId) {
+          setFormValues((prev) => setByPath(prev, "orderId", response.orderId));
+        }
+      } catch (apiError) {
+        setAutoSaveState("error");
+        setError(apiError.message || "Auto-save failed");
+        if (reason !== "manual") {
+          onNotify({
+            type: "error",
+            title: "Draft Auto-save Failed",
+            message: apiError.message || "Unable to persist draft snapshot"
+          });
+        }
+      }
+    },
+    [
+      autoSaveEnabled,
+      loadingAction,
+      prefillLoading,
+      schemaLoading,
+      isDraftDirty,
+      draftPayload,
+      formValues,
+      onNotify
+    ]
+  );
 
   const loadActiveSchema = async () => {
     setSchemaLoading(true);
@@ -399,19 +751,63 @@ export default function OrderForm({ onNotify }) {
   };
 
   const handleSubmit = async (isFinalSave) => {
+    if (isFinalSave) {
+      setShowValidation(true);
+      const submitValidationIssues = collectFieldValidationErrors(schemaFields, formValues);
+      const submitRequired = submitValidationIssues
+        .filter((issue) => / is required$/i.test(issue?.message || ""))
+        .map((issue) => issue.message.replace(/ is required$/i, "").trim());
+      const submitNonRequired = submitValidationIssues.filter(
+        (issue) => !/ is required$/i.test(issue?.message || "")
+      );
+      const isSubmitValid =
+        hasMinimumSubmitData && submitRequired.length === 0 && submitNonRequired.length === 0;
+
+      if (!isSubmitValid) {
+        setHasInteracted(true);
+        if (!hasMinimumSubmitData) {
+          setError("Final submit requires a valid Order ID (ORD-XXXXX) and at least one delivery location.");
+        } else if (submitRequired.length > 0) {
+          setError(`Missing required fields: ${Array.from(new Set(submitRequired)).join(", ")}`);
+        } else {
+          const firstNonRequiredMessage = submitNonRequired[0]?.message;
+          const hasInlineNonRequired = submitNonRequired.some((issue) => issue.inline);
+          setError(
+            hasInlineNonRequired
+              ? "Please fix highlighted field errors before final submit."
+              : firstNonRequiredMessage || "Final submit validation failed. Please review schema rules."
+          );
+        }
+        return;
+      }
+    }
+
     setError("");
     setLoadingAction(isFinalSave ? "submit" : "draft");
 
     try {
       const payload = buildOrderPayload(formValues, changeDescription, isFinalSave);
       const response = await createOrder(payload);
-      markDraftSaved(draftFingerprint);
+      const persistedFingerprint = fingerprintDraftPayload({
+        ...payload,
+        finalSave: false,
+        orderId: response.orderId
+      });
+      markDraftSaved(persistedFingerprint);
       setAutoSaveState("idle");
+
+      const currentOrderId = String(getByPath(formValues, "orderId") || "").trim().toUpperCase();
+      if (!/^ORD-[0-9]{5}$/.test(currentOrderId) || currentOrderId !== response.orderId) {
+        setFormValues((prev) => setByPath(prev, "orderId", response.orderId));
+      }
 
       onNotify({
         title: isFinalSave ? "Order Submitted" : "Draft Saved",
         message: `Version ${response.orderVersionNumber} created for ${response.orderId}`
       });
+      if (isFinalSave) {
+        setShowValidation(false);
+      }
     } catch (apiError) {
       const message = apiError.message || "Unable to create order version";
       setError(message);
@@ -473,46 +869,96 @@ export default function OrderForm({ onNotify }) {
   }, []);
 
   useEffect(() => {
-    if (!autoSaveEnabled || !canSubmit || loadingAction || prefillLoading || schemaLoading) {
-      return undefined;
+    if (schemaLoading || !resumeOrderIdParam || !schemaFields.length) {
+      return;
     }
 
-    if (draftFingerprint === lastDraftFingerprint) {
-      return undefined;
-    }
+    let cancelled = false;
 
-    const timeoutId = window.setTimeout(async () => {
-      setAutoSaveState("saving");
+    const resumeDraft = async () => {
+      setResumeLoading(true);
+      setError("");
 
       try {
-        const payload = {
-          ...draftPayload,
-          finalSave: false,
-          changeDescription: draftPayload.changeDescription || "Auto-save snapshot"
-        };
+        let targetVersionNumber = resumeVersionParam;
 
-        const response = await createOrder(payload);
-        markDraftSaved(draftFingerprint);
-        setAutoSaveState("saved");
+        if (!targetVersionNumber) {
+          const history = await getVersionHistory(resumeOrderIdParam);
+          const latestWip = (history?.versions || [])
+            .filter((version) => version.orderStatus === "WIP")
+            .sort((a, b) => b.orderVersionNumber - a.orderVersionNumber)[0];
+
+          if (!latestWip) {
+            throw new Error(`No WIP draft found for ${resumeOrderIdParam}`);
+          }
+          targetVersionNumber = latestWip.orderVersionNumber;
+        }
+
+        const detail = await getSpecificVersion(resumeOrderIdParam, targetVersionNumber);
+
+        if (detail?.orderStatus !== "WIP") {
+          throw new Error(`Version ${targetVersionNumber} is not a WIP draft`);
+        }
+
+        if (cancelled) {
+          return;
+        }
+
+        applyResumedVersionToForm(detail);
+        clearResumeParams();
+        onNotify({
+          title: "Draft Resumed",
+          message: `Loaded ${detail.orderId} version ${detail.orderVersionNumber} for editing`
+        });
       } catch (apiError) {
-        setAutoSaveState("error");
-        setError(apiError.message || "Auto-save failed");
+        if (cancelled) {
+          return;
+        }
+        const message = apiError.message || `Unable to resume draft for ${resumeOrderIdParam}`;
+        setError(message);
+        clearResumeParams();
+        onNotify({ type: "error", title: "Resume Draft Failed", message });
+      } finally {
+        if (!cancelled) {
+          setResumeLoading(false);
+        }
       }
-    }, 12000);
+    };
+
+    void resumeDraft();
 
     return () => {
-      window.clearTimeout(timeoutId);
+      cancelled = true;
     };
   }, [
-    autoSaveEnabled,
-    canSubmit,
-    draftFingerprint,
-    draftPayload,
-    lastDraftFingerprint,
-    loadingAction,
-    prefillLoading,
-    schemaLoading
+    schemaLoading,
+    schemaFields,
+    resumeOrderIdParam,
+    resumeVersionParam,
+    applyResumedVersionToForm,
+    clearResumeParams,
+    onNotify
   ]);
+
+  useEffect(() => {
+    const handleVisibilityChange = () => {
+      if (document.visibilityState === "hidden") {
+        void saveDraftSnapshot("visibility-change");
+      }
+    };
+
+    const handlePageHide = () => {
+      void saveDraftSnapshot("page-hide");
+    };
+
+    document.addEventListener("visibilitychange", handleVisibilityChange);
+    window.addEventListener("pagehide", handlePageHide);
+
+    return () => {
+      document.removeEventListener("visibilitychange", handleVisibilityChange);
+      window.removeEventListener("pagehide", handlePageHide);
+    };
+  }, [saveDraftSnapshot]);
 
   useEffect(() => {
     if (autoSaveState !== "saved" && autoSaveState !== "error") {
@@ -576,12 +1022,22 @@ export default function OrderForm({ onNotify }) {
     const required = Boolean(field.required);
     const placeholder = field.placeholder || label;
     const value = getByPath(formValues, path);
+    const fieldErrors = hasInteracted ? fieldErrorMap[path] || [] : [];
+    const firstFieldError = fieldErrors[0] || "";
+    const fieldHasError = Boolean(firstFieldError);
+    const errorInputClass = fieldHasError
+      ? "border-red-400/80 focus:border-red-400 focus:ring-red-400/40"
+      : "";
 
     if (type === "subform") {
       const subFields = Array.isArray(field.subFields) ? field.subFields : [];
 
       return (
-        <div className="rounded-xl border border-slate-700 bg-slate-900/40 p-4">
+        <div
+          className={`rounded-xl border bg-slate-900/40 p-4 ${
+            fieldHasError ? "border-red-400/70" : "border-slate-700"
+          }`}
+        >
           <p className="mb-3 text-xs font-semibold uppercase tracking-wide text-slate-300">
             {label}
             {required ? <span className="ml-1 text-red-300">*</span> : null}
@@ -602,6 +1058,7 @@ export default function OrderForm({ onNotify }) {
               );
             })}
           </div>
+          {fieldHasError ? <p className="mt-2 text-xs text-red-300">{firstFieldError}</p> : null}
         </div>
       );
     }
@@ -623,7 +1080,11 @@ export default function OrderForm({ onNotify }) {
       };
 
       return (
-        <div className="rounded-xl border border-slate-700 bg-slate-900/40 p-4">
+        <div
+          className={`rounded-xl border bg-slate-900/40 p-4 ${
+            fieldHasError ? "border-red-400/70" : "border-slate-700"
+          }`}
+        >
           <div className="mb-3 flex items-center justify-between gap-2">
             <p className="text-xs font-semibold uppercase tracking-wide text-slate-300">
               {label}
@@ -670,6 +1131,7 @@ export default function OrderForm({ onNotify }) {
               ))}
             </div>
           )}
+          {fieldHasError ? <p className="mt-2 text-xs text-red-300">{firstFieldError}</p> : null}
         </div>
       );
     }
@@ -695,7 +1157,11 @@ export default function OrderForm({ onNotify }) {
       };
 
       return (
-        <div className="rounded-xl border border-slate-700 bg-slate-900/40 p-4">
+        <div
+          className={`rounded-xl border bg-slate-900/40 p-4 ${
+            fieldHasError ? "border-red-400/70" : "border-slate-700"
+          }`}
+        >
           <div className="mb-3 flex items-center justify-between gap-2">
             <p className="text-xs font-semibold uppercase tracking-wide text-slate-300">
               {label}
@@ -725,21 +1191,29 @@ export default function OrderForm({ onNotify }) {
               ))}
             </div>
           )}
+          {fieldHasError ? <p className="mt-2 text-xs text-red-300">{firstFieldError}</p> : null}
         </div>
       );
     }
 
     if (type === "checkbox") {
       return (
-        <label className="inline-flex items-center gap-2 rounded-lg border border-slate-700 bg-slate-900/40 px-3 py-2 text-sm text-slate-200">
-          <input
-            type="checkbox"
-            checked={Boolean(value)}
-            onChange={(event) => updatePathValue(path, event.target.checked)}
-          />
-          {label}
-          {required ? <span className="text-red-300">*</span> : null}
-        </label>
+        <div>
+          <label
+            className={`inline-flex items-center gap-2 rounded-lg border bg-slate-900/40 px-3 py-2 text-sm text-slate-200 ${
+              fieldHasError ? "border-red-400/80" : "border-slate-700"
+            }`}
+          >
+            <input
+              type="checkbox"
+              checked={Boolean(value)}
+              onChange={(event) => updatePathValue(path, event.target.checked)}
+            />
+            {label}
+            {required ? <span className="text-red-300">*</span> : null}
+          </label>
+          {fieldHasError ? <p className="mt-1 text-xs text-red-300">{firstFieldError}</p> : null}
+        </div>
       );
     }
 
@@ -752,7 +1226,7 @@ export default function OrderForm({ onNotify }) {
             {required ? <span className="ml-1 text-red-300">*</span> : null}
           </span>
           <select
-            className="form-input"
+            className={`form-input ${errorInputClass}`}
             value={value ?? ""}
             onChange={(event) => updatePathValue(path, event.target.value)}
           >
@@ -766,6 +1240,7 @@ export default function OrderForm({ onNotify }) {
               );
             })}
           </select>
+          {fieldHasError ? <p className="mt-1 text-xs text-red-300">{firstFieldError}</p> : null}
         </label>
       );
     }
@@ -778,7 +1253,7 @@ export default function OrderForm({ onNotify }) {
             {required ? <span className="ml-1 text-red-300">*</span> : null}
           </span>
           <input
-            className="form-input"
+            className={`form-input ${errorInputClass}`}
             type="number"
             value={value ?? ""}
             placeholder={placeholder}
@@ -787,6 +1262,7 @@ export default function OrderForm({ onNotify }) {
               updatePathValue(path, nextValue === "" ? "" : Number(nextValue));
             }}
           />
+          {fieldHasError ? <p className="mt-1 text-xs text-red-300">{firstFieldError}</p> : null}
         </label>
       );
     }
@@ -799,11 +1275,12 @@ export default function OrderForm({ onNotify }) {
             {required ? <span className="ml-1 text-red-300">*</span> : null}
           </span>
           <input
-            className="form-input"
+            className={`form-input ${errorInputClass}`}
             type="date"
             value={value ?? ""}
             onChange={(event) => updatePathValue(path, event.target.value)}
           />
+          {fieldHasError ? <p className="mt-1 text-xs text-red-300">{firstFieldError}</p> : null}
         </label>
       );
     }
@@ -816,12 +1293,13 @@ export default function OrderForm({ onNotify }) {
           {required ? <span className="ml-1 text-red-300">*</span> : null}
         </span>
         <input
-          className="form-input"
+          className={`form-input ${errorInputClass}`}
           value={value ?? ""}
           placeholder={placeholder}
           readOnly={isReadOnly}
           onChange={(event) => updatePathValue(path, event.target.value)}
         />
+        {fieldHasError ? <p className="mt-1 text-xs text-red-300">{firstFieldError}</p> : null}
       </label>
     );
   };
@@ -844,6 +1322,10 @@ export default function OrderForm({ onNotify }) {
               />
               Auto-save drafts
             </label>
+            <span className="inline-flex items-center gap-2 rounded-lg border border-slate-700 bg-slate-900/40 px-3 py-1.5 text-xs">
+              <span className={`h-2 w-2 rounded-full ${autoSaveUi.dotClass}`} />
+              <span className={autoSaveUi.textClass}>{autoSaveUi.label}</span>
+            </span>
           </div>
         </div>
 
@@ -861,6 +1343,18 @@ export default function OrderForm({ onNotify }) {
         {schemaLoading ? (
           <div className="mb-4 inline-flex items-center gap-2 text-sm text-slate-300">
             <Loader2 className="h-4 w-4 animate-spin" /> Loading schema-driven form...
+          </div>
+        ) : null}
+
+        {resumeLoading ? (
+          <div className="mb-4 inline-flex items-center gap-2 text-sm text-blue-200">
+            <Loader2 className="h-4 w-4 animate-spin" /> Resuming draft...
+          </div>
+        ) : null}
+
+        {error ? (
+          <div className="mb-4 rounded-lg border border-red-500/50 bg-red-500/20 px-3 py-2 text-sm text-red-200">
+            {error}
           </div>
         ) : null}
 
@@ -897,23 +1391,11 @@ export default function OrderForm({ onNotify }) {
           <p className="text-sm text-slate-300">No schema fields available to render.</p>
         )}
 
-        {hasInteracted && missingRequiredFields.length > 0 ? (
-          <div className="mt-4 rounded-lg border border-yellow-500/50 bg-yellow-500/20 px-3 py-2 text-sm text-yellow-100">
-            Missing required fields: {Array.from(new Set(missingRequiredFields)).join(", ")}
-          </div>
-        ) : null}
-
-        {error ? (
-          <div className="mt-4 rounded-lg border border-red-500/50 bg-red-500/20 px-3 py-2 text-sm text-red-200">
-            {error}
-          </div>
-        ) : null}
-
         <div className="mt-6 flex flex-wrap items-center gap-3">
           <button
             className="secondary-btn"
             type="button"
-            disabled={!canSubmit || loadingAction.length > 0 || prefillLoading || schemaLoading}
+            disabled={loadingAction.length > 0 || prefillLoading || schemaLoading}
             onClick={() => handleSubmit(false)}
           >
             {loadingAction === "draft" ? <Loader2 className="h-4 w-4 animate-spin" /> : <Save className="h-4 w-4" />}
@@ -923,7 +1405,7 @@ export default function OrderForm({ onNotify }) {
           <button
             className="primary-btn"
             type="button"
-            disabled={!canSubmit || loadingAction.length > 0 || prefillLoading || schemaLoading}
+            disabled={!canSubmit}
             onClick={() => handleSubmit(true)}
           >
             {loadingAction === "submit" ? <Loader2 className="h-4 w-4 animate-spin" /> : <Send className="h-4 w-4" />}
@@ -934,12 +1416,14 @@ export default function OrderForm({ onNotify }) {
             <Clock3 className="h-3.5 w-3.5" />
             {autoSaveEnabled
               ? autoSaveState === "saving"
-                ? "Auto-save in progress"
-                : autoSaveState === "saved"
-                  ? `Auto-saved ${formatDateTime(lastSavedAt)}`
-                  : autoSaveState === "error"
-                    ? "Auto-save failed"
-                    : "Auto-save watches for changes every 12s"
+                  ? "Auto-save in progress"
+                  : autoSaveState === "saved"
+                    ? `Auto-saved ${formatDateTime(lastSavedAt)}`
+                    : autoSaveState === "error"
+                      ? "Auto-save failed"
+                      : isDraftDirty
+                        ? "Draft changes pending. Auto-save triggers on tab switch/close."
+                        : "Draft synced. Auto-save triggers on tab switch/close."
               : "Auto-save disabled"}
           </span>
         </div>

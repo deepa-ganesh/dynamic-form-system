@@ -23,9 +23,13 @@ import org.springframework.transaction.annotation.Transactional;
 
 import java.time.LocalDateTime;
 import java.util.Comparator;
+import java.util.Collections;
+import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.Optional;
+import java.util.concurrent.ThreadLocalRandom;
+import java.util.regex.Pattern;
 import java.util.stream.Collectors;
 
 /**
@@ -44,9 +48,13 @@ import java.util.stream.Collectors;
 @Slf4j
 public class VersionOrchestrationService {
 
+    private static final Pattern ORDER_ID_PATTERN = Pattern.compile("^ORD-[0-9]{5}$");
+    private static final int MAX_ORDER_ID_GENERATION_ATTEMPTS = 20;
+
     private final OrderVersionedRepository orderVersionedRepository;
     private final OrderVersionIndexRepository orderVersionIndexRepository;
     private final FormSchemaRepository formSchemaRepository;
+    private final ValidationService validationService;
 
     /**
      * List latest order snapshot for all orders.
@@ -88,9 +96,29 @@ public class VersionOrchestrationService {
         String formVersionId = activeSchema.getFormVersionId();
         log.debug("Using form schema version: {}", formVersionId);
 
+        OrderStatus orderStatus = request.isFinalSave() ? OrderStatus.COMMITTED : OrderStatus.WIP;
+        String resolvedOrderId = resolveOrderId(request.getOrderId(), orderStatus);
+        List<String> resolvedDeliveryLocations = normalizeDeliveryLocations(request.getDeliveryLocations());
+        Map<String, Object> resolvedOrderData = request.getData() != null
+            ? new HashMap<>(request.getData())
+            : new HashMap<>();
+
+        if (orderStatus == OrderStatus.COMMITTED) {
+            validateFinalSaveRequest(resolvedOrderId, resolvedDeliveryLocations);
+        }
+
+        // Validate payload against active schema before persisting immutable version.
+        // Include top-level request fields so schema rules for orderId/deliveryLocations can apply.
+        if (orderStatus == OrderStatus.COMMITTED) {
+            Map<String, Object> validationPayload = new HashMap<>(resolvedOrderData);
+            validationPayload.put("orderId", resolvedOrderId);
+            validationPayload.put("deliveryLocations", resolvedDeliveryLocations);
+            validationService.validateOrderData(validationPayload, activeSchema);
+        }
+
         // Step 2: Determine next version number
         Optional<OrderVersionIndex> latestVersionIndex =
-            orderVersionIndexRepository.findTopByOrderIdOrderByOrderVersionNumberDesc(request.getOrderId());
+            orderVersionIndexRepository.findTopByOrderIdOrderByOrderVersionNumberDesc(resolvedOrderId);
 
         int newVersionNumber;
         Integer previousVersionNumber = null;
@@ -107,12 +135,9 @@ public class VersionOrchestrationService {
             log.debug("New order. Creating version 1");
         }
 
-        // Step 3: Determine status based on finalSave flag
-        OrderStatus orderStatus = request.isFinalSave() ? OrderStatus.COMMITTED : OrderStatus.WIP;
-
-        // Step 4: Build new document
+        // Step 3: Build new document
         OrderVersionedDocument newDocument = OrderVersionedDocument.builder()
-            .orderId(request.getOrderId())
+            .orderId(resolvedOrderId)
             .orderVersionNumber(newVersionNumber)
             .formVersionId(formVersionId)
             .orderStatus(orderStatus)
@@ -121,13 +146,13 @@ public class VersionOrchestrationService {
             .isLatestVersion(true)  // This is now the latest
             .previousVersionNumber(previousVersionNumber)
             .changeDescription(request.getChangeDescription())
-            .orderData(request.getData())
+            .orderData(resolvedOrderData)
             .build();
 
         // Step 5: Save to MongoDB
         OrderVersionedDocument savedDocument = orderVersionedRepository.save(newDocument);
         log.info("Saved version {} for orderId: {} with status: {}",
-                 newVersionNumber, request.getOrderId(), orderStatus);
+                 newVersionNumber, resolvedOrderId, orderStatus);
 
         // Step 6: Create index entry
         createVersionIndex(savedDocument);
@@ -177,6 +202,72 @@ public class VersionOrchestrationService {
         int dataSize = document.getOrderData() != null ?
                       document.getOrderData().toString().length() * 2 : 0;
         return baseSize + dataSize;
+    }
+
+    private String resolveOrderId(String orderId, OrderStatus orderStatus) {
+        String normalizedOrderId = normalizeOrderId(orderId);
+
+        if (orderStatus == OrderStatus.COMMITTED) {
+            if (!isValidOrderId(normalizedOrderId)) {
+                throw new ValidationException("orderId", "Order ID must be in format ORD-XXXXX");
+            }
+            return normalizedOrderId;
+        }
+
+        if (isValidOrderId(normalizedOrderId)) {
+            return normalizedOrderId;
+        }
+
+        String generatedOrderId = generateDraftOrderId();
+        log.debug("Generated draft orderId: {} (input was missing/invalid)", generatedOrderId);
+        return generatedOrderId;
+    }
+
+    private void validateFinalSaveRequest(String orderId, List<String> deliveryLocations) {
+        if (!isValidOrderId(orderId)) {
+            throw new ValidationException("orderId", "Order ID must be in format ORD-XXXXX");
+        }
+
+        if (deliveryLocations.isEmpty()) {
+            throw new ValidationException("deliveryLocations", "At least one delivery location is required");
+        }
+
+        if (deliveryLocations.size() > 10) {
+            throw new ValidationException("deliveryLocations", "Between 1 and 10 delivery locations allowed");
+        }
+    }
+
+    private List<String> normalizeDeliveryLocations(List<String> deliveryLocations) {
+        if (deliveryLocations == null) {
+            return Collections.emptyList();
+        }
+
+        return deliveryLocations.stream()
+            .filter(location -> location != null && !location.trim().isEmpty())
+            .map(String::trim)
+            .collect(Collectors.toList());
+    }
+
+    private String normalizeOrderId(String orderId) {
+        return orderId == null ? "" : orderId.trim().toUpperCase();
+    }
+
+    private boolean isValidOrderId(String orderId) {
+        return orderId != null && ORDER_ID_PATTERN.matcher(orderId).matches();
+    }
+
+    private String generateDraftOrderId() {
+        for (int attempt = 0; attempt < MAX_ORDER_ID_GENERATION_ATTEMPTS; attempt++) {
+            int nextValue = ThreadLocalRandom.current().nextInt(0, 100000);
+            String candidate = String.format("ORD-%05d", nextValue);
+            if (orderVersionIndexRepository.countByOrderId(candidate) == 0L) {
+                return candidate;
+            }
+        }
+
+        // Rare fallback; still keeps ORD-XXXXX format.
+        int fallback = Math.abs((int) (System.currentTimeMillis() % 100000));
+        return String.format("ORD-%05d", fallback);
     }
 
     /**

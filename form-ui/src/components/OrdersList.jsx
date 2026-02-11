@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useState } from "react";
-import { Copy, Eye, Loader2, RefreshCcw, Search } from "lucide-react";
+import { Copy, Edit3, Eye, Loader2, RefreshCcw, Search } from "lucide-react";
 import { useNavigate } from "react-router-dom";
 import { getAllOrders } from "../services/api";
 
@@ -74,6 +74,10 @@ export default function OrdersList({ onNotify }) {
 
   const openHistory = (orderId) => {
     navigate(`/history?orderId=${encodeURIComponent(orderId)}`);
+  };
+
+  const resumeDraft = (orderId) => {
+    navigate(`/orders?resumeOrderId=${encodeURIComponent(orderId)}`);
   };
 
   return (
@@ -175,6 +179,15 @@ export default function OrdersList({ onNotify }) {
                         <button className="primary-btn px-3 py-1.5" type="button" onClick={() => openHistory(order.orderId)}>
                           <Eye className="h-3.5 w-3.5" /> History
                         </button>
+                        {order.orderStatus === "WIP" ? (
+                          <button
+                            className="secondary-btn px-3 py-1.5"
+                            type="button"
+                            onClick={() => resumeDraft(order.orderId)}
+                          >
+                            <Edit3 className="h-3.5 w-3.5" /> Resume Draft
+                          </button>
+                        ) : null}
                       </div>
                     </td>
                   </tr>

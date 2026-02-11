@@ -99,13 +99,23 @@ class OrderControllerIntegrationTest {
 
     @Test
     @WithMockUser(username = "user", roles = {"USER"})
-    @DisplayName("Should return 400 for invalid order request")
-    void shouldReturn400ForInvalidRequest() throws Exception {
-        // Arrange - missing required orderId
+    @DisplayName("Should allow draft creation without order ID")
+    void shouldAllowDraftCreationWithoutOrderId() throws Exception {
+        // Arrange - orderId intentionally omitted for draft behavior
         CreateOrderRequest request = CreateOrderRequest.builder()
             .deliveryLocations(List.of("Location A"))
             .data(Map.of("field1", "value1"))
+            .finalSave(false)
             .build();
+
+        OrderVersionResponse mockedResponse = OrderVersionResponse.builder()
+            .orderId("ORD-54321")
+            .orderVersionNumber(1)
+            .orderStatus(OrderStatus.WIP)
+            .isLatestVersion(true)
+            .build();
+        when(versionOrchestrationService.createNewVersion(any(CreateOrderRequest.class), anyString()))
+            .thenReturn(mockedResponse);
 
         String requestJson = objectMapper.writeValueAsString(request);
 
@@ -113,6 +123,8 @@ class OrderControllerIntegrationTest {
         mockMvc.perform(post("/v1/orders")
                 .contentType(MediaType.APPLICATION_JSON)
                 .content(requestJson))
-            .andExpect(status().isBadRequest());
+            .andExpect(status().isCreated())
+            .andExpect(jsonPath("$.orderId").value("ORD-54321"))
+            .andExpect(jsonPath("$.orderStatus").value("WIP"));
     }
 }

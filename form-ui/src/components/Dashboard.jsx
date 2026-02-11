@@ -82,7 +82,8 @@ export default function Dashboard() {
 
   return (
     <div className="relative min-h-screen text-slate-100">
-      <div className="pointer-events-none fixed inset-0 -z-10 bg-gradient-to-br from-gray-900 via-blue-900 to-gray-900" />
+      <div className="pointer-events-none fixed inset-0 -z-10 bg-gradient-to-br from-slate-950 via-blue-950 to-black" />
+      <div className="pointer-events-none fixed inset-0 -z-10 bg-[radial-gradient(circle_at_30%_20%,rgba(15,23,42,0.45),transparent_55%)]" />
       <div className="mx-auto w-full max-w-[110rem] px-4 pb-10 pt-8 sm:px-6 lg:px-10">
         <div className="sticky top-0 z-40 mb-6">
           <div className={`transition-all duration-300 ${isCompact ? "pt-2" : "pt-0"}`}>
